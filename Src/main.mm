@@ -124,7 +124,7 @@ static bool   g_tLeave = false;
     // Само меню
     if (g_open) {
         ImGui::SetNextWindowPos(ImVec2(120, 60), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(430, 250), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(500, 300), ImGuiCond_FirstUseEver);
 
         ImGui::Begin("Synapse iPA", &g_open);
 
@@ -135,40 +135,59 @@ static bool   g_tLeave = false;
         {
             if (ImGui::BeginTabItem("Visuals"))
             {
-                ImGui::Text("Esp player");
-                ImGui::Checkbox("Enabled", &visuals::esp_enabled);
+                if (ImGui::BeginTable("visuals_cols", 2,
+                    ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoPadOuterX))
+                {
+                    ImGui::TableNextRow();
 
-                ImGui::SeparatorText("Configuration");
+                    // ---- ЛЕВАЯ КОЛОНКА ----
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::Text("ESP");
+                    ImGui::Checkbox("Enabled", &visuals::esp_enabled);
+                    ImGui::Separator();
 
-                ImGui::Checkbox("2D Box", &visuals::box2D);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## 2D Box Color", visuals::box_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                    ImGui::Checkbox("2D Box", &visuals::box2D);
+                    ImGui::SameLine(); ImGui::SetNextItemWidth(40);
+                    ImGui::ColorEdit4("##2DBox", visuals::box_color,
+                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
 
-                ImGui::Checkbox("Filled", &visuals::boxFill);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## Box Fill Color", visuals::box_fill_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                    ImGui::Checkbox("Filled", &visuals::boxFill);
+                    ImGui::SameLine(); ImGui::SetNextItemWidth(40);
+                    ImGui::ColorEdit4("##BoxFill", visuals::box_fill_color,
+                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
 
-                ImGui::Checkbox("Health Bar", &visuals::healthBar);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## Health Bar Color", visuals::healthbar_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                    ImGui::Checkbox("Health Bar", &visuals::healthBar);
+                    ImGui::SameLine(); ImGui::SetNextItemWidth(40);
+                    ImGui::ColorEdit4("##HealthBar", visuals::healthbar_color,
+                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
 
-                ImGui::Checkbox("Names", &visuals::names);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## Names Color", visuals::names_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                    // ---- ПРАВАЯ КОЛОНКА ----
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::Text("Extra");
+                    ImGui::Checkbox("Names", &visuals::names);
+                    ImGui::SameLine(); ImGui::SetNextItemWidth(40);
+                    ImGui::ColorEdit4("##Names", visuals::names_color,
+                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
 
-                ImGui::Checkbox("Weapon Text", &visuals::weaponText);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## Weapon Text Color", visuals::weapon_text_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-                
-                ImGui::Checkbox("Weapon Icon", &visuals::weaponIcon);
+                    ImGui::Checkbox("Weapon Text", &visuals::weaponText);
+                    ImGui::SameLine(); ImGui::SetNextItemWidth(40);
+                    ImGui::ColorEdit4("##WeaponText", visuals::weapon_text_color,
+                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
 
-                ImGui::Checkbox("Distance", &visuals::distance);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## Distance Color", visuals::distance_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                    ImGui::Checkbox("Weapon Icon", &visuals::weaponIcon);
 
-                ImGui::Checkbox("Tracer", &visuals::tracer);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## Tracer Color", visuals::tracer_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                    ImGui::Checkbox("Distance", &visuals::distance);
+                    ImGui::SameLine(); ImGui::SetNextItemWidth(40);
+                    ImGui::ColorEdit4("##Distance", visuals::distance_color,
+                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+
+                    ImGui::Checkbox("Tracer", &visuals::tracer);
+                    ImGui::SameLine(); ImGui::SetNextItemWidth(40);
+                    ImGui::ColorEdit4("##Tracer", visuals::tracer_color,
+                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+
+                    ImGui::EndTable();
+                }
                 ImGui::EndTabItem();
             }
 
