@@ -5,11 +5,11 @@
 #include "imgui_impl_metal.h"
 
 #include "Features/Visuals/visuals.h"
-#include "Features/Aim/Aim.h"
-#include "Settings/Settings.h"
+#include "Features/Aim/aim.h"
+#include "Features/Rage/rage.h"
+#include "Settings/settings.h"
 
 #include "Memory/KittyInclude.hpp"
-#include "il2cpp/IL2CPP_Resolver.hpp"
 
 static bool   g_open = false;
 static CGRect g_btnRect, g_menuRect;
@@ -111,6 +111,7 @@ static bool   g_tLeave = false;
 
     visuals::run();
     aim::run();
+    rage::run();
 
     // Кнопка вызова меню (всегда видна)
     ImGui::SetNextWindowPos(ImVec2(20, 60), ImGuiCond_FirstUseEver);
@@ -191,6 +192,19 @@ static bool   g_tLeave = false;
                 ImGui::EndTabItem();
             }
 
+            if (ImGui::BeginTabItem("Rage"))
+            {
+                ImGui::Checkbox("No Spread", &aim::aimbot);
+
+                ImGui::Checkbox("Draw FOV", &aim::drawFOV);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## FOV Color", aim::fov_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                ImGui::SliderFloat("FOV Radius", &aim::fov_radius, 60.f, 180.f, "%.0f");
+
+                ImGui::Checkbox("RCS", &aim::RCS);
+                ImGui::EndTabItem();
+            }
+
             if (ImGui::BeginTabItem("Settings"))
             {
                 ImGui::Text("Settings");
@@ -246,7 +260,5 @@ static void tryInstall(void) {
 }
 
 __attribute__((constructor)) static void init(void) {
-    IL2CPP::Initialize(true, 5, IL2CPP_FRAMEWORK(BINARY_NAME));
-
     tryInstall();
 }
