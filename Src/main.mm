@@ -124,7 +124,7 @@ static bool   g_tLeave = false;
     // Само меню
     if (g_open) {
         ImGui::SetNextWindowPos(ImVec2(120, 60), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(325, 190), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(430, 250), ImGuiCond_FirstUseEver);
 
         ImGui::Begin("Synapse iPA", &g_open);
 
@@ -144,7 +144,7 @@ static bool   g_tLeave = false;
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## 2D Box Color", visuals::box_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
 
-                ImGui::Checkbox("Box Fill", &visuals::boxFill);
+                ImGui::Checkbox("Filled", &visuals::boxFill);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## Box Fill Color", visuals::box_fill_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
 
@@ -179,7 +179,7 @@ static bool   g_tLeave = false;
                 ImGui::Checkbox("Draw FOV", &aim::drawFOV);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## FOV Color", aim::fov_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-                ImGui::SliderFloat("FOV Radius", &aim::fov_radius, 10.f, 500.f, "%.0f");
+                ImGui::SliderFloat("Radius", &aim::fov_radius, 60.f, 180.f, "%.0f");
 
                 ImGui::Checkbox("RCS", &aim::RCS);
                 ImGui::EndTabItem();
@@ -190,7 +190,7 @@ static bool   g_tLeave = false;
                 ImGui::Text("Settings");
                 ImGui::Checkbox("Watermark", &settings::watermark);
                 ImGui::Text("iPA by wurvt");
-                ImGui::Text("v0.0.3b");
+                ImGui::Text("v0.0.4b");
 
                 ImGui::EndTabItem();
             }
