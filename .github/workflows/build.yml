@@ -1,0 +1,29 @@
+name: build
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile dylib
+        run: |
+          xcrun -sdk iphoneos clang++ -arch arm64 -miphoneos-version-min=14.0 -std=c++17 -fobjc-arc \
+            -dynamiclib \
+            -I Src/ImGui -I Src/ImGui/Backends \
+            Src/main.mm \
+            Src/ImGui/imgui.cpp \
+            Src/ImGui/imgui_draw.cpp \
+            Src/ImGui/imgui_tables.cpp \
+            Src/ImGui/imgui_widgets.cpp \
+            Src/ImGui/Backends/imgui_impl_metal.mm \
+            -framework UIKit -framework Foundation -framework Metal -framework MetalKit -framework QuartzCore -framework CoreGraphics \
+            -o Synapse.dylib
+      - name: Verify
+        run: file Synapse.dylib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Synapse-build-${{ github.run_number }}
+          path: Synapse.dylib
