@@ -195,6 +195,7 @@ static bool   g_tLeave = false;
             if (ImGui::BeginTabItem("Rage"))
             {
                 ImGui::Checkbox("No Spread", &rage::noSpread);
+                ImGui::EndTabItem();
             }
 
             if (ImGui::BeginTabItem("Settings"))
