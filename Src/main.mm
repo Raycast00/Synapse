@@ -109,9 +109,9 @@ static bool   g_tLeave = false;
 
     ImDrawList* drawList = ImGui::GetBackgroundDrawList();
 
-    visuals::run();
+    //visuals::run();
     aim::run();
-    rage::run();
+    //rage::run();
 
     // Кнопка вызова меню (всегда видна)
     ImGui::SetNextWindowPos(ImVec2(20, 60), ImGuiCond_FirstUseEver);
