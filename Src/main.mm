@@ -253,5 +253,6 @@ static void tryInstall(void) {
 }
 
 __attribute__((constructor)) static void init(void) {
+    IL2CPP::Initialize(true, 5, IL2CPP_FRAMEWORK(BINARY_NAME));
     tryInstall();
 }
