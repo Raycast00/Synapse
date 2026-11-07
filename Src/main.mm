@@ -4,10 +4,10 @@
 #include "imgui.h"
 #include "imgui_impl_metal.h"
 
-#include "Features/Visuals/Visuals.h"
-#include "Features/Aim/Aim.h"
-#include "Features/Rage/Rage.h"
-#include "Settings/Settings.h"
+#include "Features/Visuals/visuals.h"
+#include "Features/Aim/aim.h"
+#include "Features/Rage/rage.h"
+#include "Settings/settings.h"
 
 #include "Memory/KittyInclude.hpp"
 
