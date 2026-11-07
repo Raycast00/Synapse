@@ -12,7 +12,14 @@ static bool   g_checkbox = false;
 - (BOOL)canBecomeKeyWindow { return NO; }
 - (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
     if (self.hidden) return nil;
-    bool hit = CGRectContainsPoint(g_btnRect, p) || (g_open && CGRectContainsPoint(g_menuRect, p));
+    
+    // Если меню открыто — блокируем игру полностью (все касания идут в ImGui)
+    if (g_open) {
+        return [super hitTest:p withEvent:e];
+    }
+    
+    // Если меню закрыто — пропускаем касания в игру, КРОМЕ области кнопки "Menu"
+    bool hit = CGRectContainsPoint(g_btnRect, p);
     return hit ? [super hitTest:p withEvent:e] : nil;
 }
 @end
@@ -38,18 +45,24 @@ static bool   g_checkbox = false;
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::GetIO().IniFilename = nullptr;
-    ImGui::GetIO().FontGlobalScale = 1.8f;
+
+    // 🔥 УМЕНЬШАЕМ РАЗМЕР ИНТЕРФЕЙСА
+    ImGui::GetIO().FontGlobalScale = 0.9f; // Было 1.8f — стало 0.9f
+    ImGui::GetStyle().ScaleAllSizes(0.5f); // Уменьшаем отступы и размеры элементов
+
     ImGui::StyleColorsLight();
     ImGui_ImplMetal_Init(dev);
     return self;
 }
 
 - (void)touch:(NSSet *)t down:(BOOL)down {
-    CGPoint p = [[t anyObject] locationInView:self];
+    UITouch *touch = [t anyObject];
+    CGPoint p = [touch locationInView:self];
     ImGuiIO &io = ImGui::GetIO();
     io.AddMousePosEvent(p.x, p.y);
     io.AddMouseButtonEvent(0, down);
 }
+
 - (void)touchesBegan:(NSSet *)t withEvent:(UIEvent *)e     { [self touch:t down:YES]; }
 - (void)touchesMoved:(NSSet *)t withEvent:(UIEvent *)e     { [self touch:t down:YES]; }
 - (void)touchesEnded:(NSSet *)t withEvent:(UIEvent *)e     { [self touch:t down:NO]; }
@@ -75,7 +88,9 @@ static bool   g_checkbox = false;
     ImGui::SetNextWindowPos(ImVec2(20, 60), ImGuiCond_FirstUseEver);
     ImGui::Begin("##btn", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                  ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar);
-    if (ImGui::Button(g_open ? "Close" : "Menu")) g_open = !g_open;
+    if (ImGui::Button(g_open ? "Close" : "Menu")) {
+        g_open = !g_open;
+    }
     g_btnRect = CGRectMake(ImGui::GetWindowPos().x, ImGui::GetWindowPos().y,
                            ImGui::GetWindowSize().x, ImGui::GetWindowSize().y);
     ImGui::End();
