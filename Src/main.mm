@@ -55,8 +55,9 @@ static bool   g_checkbox = false;
 
     // Rounding shit
     ImGui::GetStyle().FrameRounding = 3.0f;
-
     ImGui::StyleColorsLight();
+    ImGui::GetStyle().Colors[ImGuiCol_CheckMark] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
+
     ImGui_ImplMetal_Init(dev);
     return self;
 }
@@ -105,6 +106,11 @@ static bool   g_checkbox = false;
     if (g_open) {
         ImGui::SetNextWindowPos(ImVec2(120, 60), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(260, 160), ImGuiCond_FirstUseEver);
+
+        if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
+            ImGui::SetNextWindowFocus();
+        }
+
         ImGui::Begin("Synapse IPA", &g_open);
 
         if (ImGui::BeginTabBar("Tabs"))
