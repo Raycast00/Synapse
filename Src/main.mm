@@ -23,9 +23,6 @@ static int    g_tPhase = 0;      // 0 idle, 1 hover frame, 2 send down, 3 held
 static bool   g_tRelease = false;
 static bool   g_tLeave = false;
 
-static bool g_il2cppReady = false;
-static bool g_triedInit = false;
-
 @interface OverlayWindow : UIWindow @end
 @implementation OverlayWindow
 - (BOOL)canBecomeKeyWindow { return NO; }
@@ -89,12 +86,6 @@ static bool g_triedInit = false;
 - (void)mtkView:(MTKView *)v drawableSizeWillChange:(CGSize)s {}
 
 - (void)drawInMTKView:(MTKView *)view {
-    if (!g_triedInit)
-    {
-        g_triedInit = true;
-        g_il2cppReady = IL2CPP::Initialize(true, 10, IL2CPP_FRAMEWORK(BINARY_NAME));
-    }
-
     MTLRenderPassDescriptor *rpd = view.currentRenderPassDescriptor;
     if (!rpd) return;
 
@@ -214,14 +205,6 @@ static bool g_triedInit = false;
                 ImGui::Checkbox("Watermark", &settings::watermark);
                 ImGui::Text("iPA by wurvt");
                 ImGui::Text("v0.0.4b");
-                if (g_il2cppReady)
-                {
-                    ImGui::Text("il2cpp initialized");
-                }
-                else
-                {
-                    ImGui::Text("il2cpp failed to initialize");
-                }
 
                 ImGui::EndTabItem();
             }
