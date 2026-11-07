@@ -14,7 +14,7 @@ jobs:
             -dynamiclib \
             -I Src/ImGui -I Src/ImGui/Backends -I Src/Memory \
             Src/main.mm \
-            Src/aim.mm \
+            Src/Features/Aim/aim.mm \
             Src/Memory/KittyAsm.cpp \
             Src/Memory/KittyIOFile.cpp \
             Src/Memory/KittyMemory.cpp \
