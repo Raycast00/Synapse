@@ -3,16 +3,51 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Normalize file case (Aim.h -> aim.h, Settings.h -> settings.h, etc.)
+        run: |
+          # macOS APFS is case-sensitive: header names in code must match disk exactly.
+          # Rename any PascalCase headers that code includes in lowercase.
+          set -e
+          cd Src
+          for f in $(find . -type f \( -name '*.h' -o -name '*.hpp' -o -name '*.mm' -o -name '*.cpp' \)); do
+            base=$(basename "$f")
+            lower=$(echo "$base" | tr '[:upper:]' '[:lower:]')
+            if [ "$base" != "$lower" ]; then
+              # only rename if the lowercase version doesn't already exist
+              dir=$(dirname "$f")
+              if [ ! -e "$dir/$lower" ]; then
+                echo "rename: $f -> $dir/$lower"
+                git mv "$f" "$dir/$lower" 2>/dev/null || mv "$f" "$dir/$lower"
+              fi
+            fi
+          done
+
       - name: Compile dylib
         run: |
-          xcrun -sdk iphoneos clang++ -arch arm64 -miphoneos-version-min=14.0 -std=c++17 -fobjc-arc -O2 \
+          set -e
+          xcrun -sdk iphoneos clang++ \
+            -arch arm64 \
+            -miphoneos-version-min=14.0 \
+            -std=c++17 \
+            -fobjc-arc \
+            -O2 \
             -dynamiclib \
-            -I Src/ImGui -I Src/ImGui/Backends -I Src/Memory \
+            -I Src \
+            -I Src/ImGui \
+            -I Src/ImGui/Backends \
+            -I Src/Memory \
+            -I Src/Math \
+            -I Src/Features/Visuals \
+            -I Src/Features/Aim \
+            -I Src/Features/Rage \
+            -I Src/Settings \
             Src/main.mm \
             Src/Features/Visuals/visuals.mm \
             Src/Features/Aim/aim.mm \
@@ -31,10 +66,20 @@ jobs:
             Src/ImGui/imgui_widgets.cpp \
             Src/ImGui/Backends/imgui_impl_metal.mm \
             Src/Memory/Deps/Keystone/libs-ios/arm64/libkeystone.a \
-            -framework UIKit -framework Foundation -framework Metal -framework MetalKit -framework QuartzCore -framework CoreGraphics \
+            -framework UIKit \
+            -framework Foundation \
+            -framework Metal \
+            -framework MetalKit \
+            -framework QuartzCore \
+            -framework CoreGraphics \
+            -install_name @rpath/Synapse.dylib \
             -o Synapse.dylib
+
       - name: Verify
-        run: file Synapse.dylib
+        run: |
+          file Synapse.dylib
+          xcrun -sdk iphoneos otool -L Synapse.dylib
+
       - uses: actions/upload-artifact@v4
         with:
           name: Synapse-build-${{ github.run_number }}
