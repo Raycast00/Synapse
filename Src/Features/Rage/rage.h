@@ -1,6 +1,6 @@
 namespace rage
 {
-    bool run();
+    void run();
 
     inline bool noSpread = false;
 }

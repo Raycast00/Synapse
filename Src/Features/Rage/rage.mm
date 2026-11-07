@@ -3,6 +3,8 @@
 #include <dlfcn.h>
 #include <unordered_map>
 #include <chrono>
+#include "Memory/KittyInclude.hpp"
+#import <Foundation/Foundation.h>
 
 // ---------- memory helpers (твои) ----------
 template <typename T>
