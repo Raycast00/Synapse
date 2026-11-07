@@ -3,6 +3,8 @@
 #include "imgui.h"
 #include "imgui_impl_metal.h"
 
+#include "Features/Visuals/visuals.h"
+
 static bool   g_open = false;
 static CGRect g_btnRect, g_menuRect;
 static bool   g_checkbox = false;
@@ -44,11 +46,15 @@ static bool   g_checkbox = false;
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    
+    // Styling
     ImGui::GetIO().IniFilename = nullptr;
 
-    // 🔥 УМЕНЬШАЕМ РАЗМЕР ИНТЕРФЕЙСА
-    ImGui::GetIO().FontGlobalScale = 0.9f; // Было 1.8f — стало 0.9f
-    ImGui::GetStyle().ScaleAllSizes(0.5f); // Уменьшаем отступы и размеры элементов
+    ImGui::GetIO().FontGlobalScale = 1.0f;
+    ImGui::GetStyle().ScaleAllSizes(0.5f);
+
+    // Rounding shit
+    ImGui::GetStyle().FrameRounding = 3.0f;
 
     ImGui::StyleColorsLight();
     ImGui_ImplMetal_Init(dev);
@@ -100,9 +106,38 @@ static bool   g_checkbox = false;
         ImGui::SetNextWindowPos(ImVec2(120, 60), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(260, 160), ImGuiCond_FirstUseEver);
         ImGui::Begin("Synapse IPA", &g_open);
-        ImGui::Text("Welcome back.");
-        ImGui::Spacing();
-        ImGui::Checkbox("Checkbox Example", &g_checkbox);
+
+        if (ImGui::BeginTabBar("Tabs"))
+        {
+            if (ImGui::BeginTabItem("Visuals"))
+            {
+                ImGui::Text("Esp player");
+                ImGui::Checkbox("2D Box", &visuals::box2D);
+                ImGui::Checkbox("Box Fill", &visuals::boxFill);
+                ImGui::Checkbox("Health Bar", &visuals::healthBar);
+                ImGui::Checkbox("Names", &visuals::names);
+                ImGui::Checkbox("Weapon Text", &visuals::weaponText);
+                ImGui::Checkbox("Weapon Icon", &visuals::weaponIcon);
+                ImGui::Checkbox("Distance", &visuals::distance);
+                ImGui::Checkbox("Tracer", &visuals::tracer);
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("Aim"))
+            {
+                ImGui::Text("AimBot");
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("Settings"))
+            {
+                ImGui::Text("Settings");
+                ImGui::EndTabItem();
+            }
+
+            ImGui::EndTabBar();
+        }
+
         ImGui::End();
     }
 
