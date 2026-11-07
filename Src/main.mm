@@ -139,10 +139,9 @@ static bool   g_tLeave = false;
             if (ImGui::BeginTabItem("Visuals"))
             {
                 // ENEMY
-                ImGui::Text("Esp player");
                 ImGui::Checkbox("Enabled", &visuals::esp_enabled);
 
-                ImGui::SeparatorText("Configuration");
+                ImGui::SeparatorText("Enemy");
 
                 ImGui::Checkbox("2D Box", &visuals::box2D);
                 ImGui::SameLine();
