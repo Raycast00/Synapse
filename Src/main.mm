@@ -252,6 +252,15 @@ static void tryInstall(void) {
     g_win.hidden = NO;
 }
 
+static inline const char* IL2CPP_FRAMEWORK(const char* NAME) {
+    NSString *appPath = [[NSBundle mainBundle] bundlePath];
+    NSString *binaryPath = [NSString stringWithFormat:@"%@/Frameworks/%@.framework/%@",
+                            appPath,
+                            [NSString stringWithUTF8String:NAME],
+                            [NSString stringWithUTF8String:NAME]];
+    return [binaryPath UTF8String];
+}
+
 __attribute__((constructor)) static void init(void) {
     IL2CPP::Initialize(true, 5, IL2CPP_FRAMEWORK(BINARY_NAME));
     tryInstall();
