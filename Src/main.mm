@@ -8,6 +8,8 @@
 #include "Features/Aim/Aim.h"
 #include "Settings/Settings.h"
 
+#include "Memory/KittyInclude.hpp"
+
 static bool   g_open = false;
 static CGRect g_btnRect, g_menuRect;
 static bool   g_checkbox = false;
@@ -53,8 +55,8 @@ static bool   g_tLeave = false;
     // Styling
     ImGui::GetIO().IniFilename = nullptr;
 
-    ImGui::GetIO().FontGlobalScale = 1.0f;
-    ImGui::GetStyle().ScaleAllSizes(0.8f);
+    ImGui::GetIO().FontGlobalScale = 0.95f;
+    ImGui::GetStyle().ScaleAllSizes(1.0f);
 
     // Rounding shit
     ImGui::GetStyle().FrameRounding = 3.0f;
@@ -130,6 +132,10 @@ static bool   g_tLeave = false;
             if (ImGui::BeginTabItem("Visuals"))
             {
                 ImGui::Text("Esp player");
+                ImGui::Checkbox("Enabled", &visuals::esp_enabled);
+                
+                ImGui::SeparatorText("Configuration");
+
                 ImGui::Checkbox("2D Box", &visuals::box2D);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## 2D Box Color", visuals::box_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);

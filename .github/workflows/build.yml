@@ -10,15 +10,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Compile dylib
         run: |
-          xcrun -sdk iphoneos clang++ -arch arm64 -miphoneos-version-min=14.0 -std=c++17 -fobjc-arc \
+          xcrun -sdk iphoneos clang++ -arch arm64 -miphoneos-version-min=14.0 -std=c++17 -fobjc-arc -O2 \
             -dynamiclib \
-            -I Src/ImGui -I Src/ImGui/Backends \
+            -I Src/ImGui -I Src/ImGui/Backends -I Src/Memory \
             Src/main.mm \
+            Src/Memory/KittyAsm.cpp \
+            Src/Memory/KittyIOFile.cpp \
+            Src/Memory/KittyMemory.cpp \
+            Src/Memory/KittyPtrValidator.cpp \
+            Src/Memory/KittyScanner.cpp \
+            Src/Memory/KittyUtils.cpp \
+            Src/Memory/MemoryBackup.cpp \
+            Src/Memory/MemoryPatch.cpp \
             Src/ImGui/imgui.cpp \
             Src/ImGui/imgui_draw.cpp \
             Src/ImGui/imgui_tables.cpp \
             Src/ImGui/imgui_widgets.cpp \
             Src/ImGui/Backends/imgui_impl_metal.mm \
+            Src/Memory/Deps/Keystone/libs-ios/arm64/libkeystone.a \
             -framework UIKit -framework Foundation -framework Metal -framework MetalKit -framework QuartzCore -framework CoreGraphics \
             -o Synapse.dylib
       - name: Verify

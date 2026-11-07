@@ -1,5 +1,7 @@
 namespace visuals
 {
+    inline bool esp_enabled = false;
+
     inline bool box2D = false;
     inline float box_color[4]{ 1.f, 1.f, 1.f, 1.f };
 
