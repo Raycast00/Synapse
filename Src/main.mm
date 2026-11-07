@@ -5,6 +5,8 @@
 #include "imgui_impl_metal.h"
 
 #include "Features/Visuals/visuals.h"
+#include "Features/Aim/Aim.h"
+#include "Settings/Settings.h"
 
 static bool   g_open = false;
 static CGRect g_btnRect, g_menuRect;
@@ -52,7 +54,7 @@ static bool   g_tLeave = false;
     ImGui::GetIO().IniFilename = nullptr;
 
     ImGui::GetIO().FontGlobalScale = 1.0f;
-    ImGui::GetStyle().ScaleAllSizes(0.5f);
+    ImGui::GetStyle().ScaleAllSizes(0.8f);
 
     // Rounding shit
     ImGui::GetStyle().FrameRounding = 3.0f;
@@ -118,7 +120,7 @@ static bool   g_tLeave = false;
         ImGui::SetNextWindowPos(ImVec2(120, 60), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(325, 190), ImGuiCond_FirstUseEver);
 
-        ImGui::Begin("Synapse IPA", &g_open);
+        ImGui::Begin("Synapse iPA", &g_open);
 
         ImVec2 wp = ImGui::GetWindowPos(), ws = ImGui::GetWindowSize();
         g_menuRect = CGRectInset(CGRectMake(wp.x, wp.y, ws.x, ws.y), -8, -8);
@@ -129,25 +131,56 @@ static bool   g_tLeave = false;
             {
                 ImGui::Text("Esp player");
                 ImGui::Checkbox("2D Box", &visuals::box2D);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## 2D Box Color", visuals::box_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+
                 ImGui::Checkbox("Box Fill", &visuals::boxFill);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## Box Fill Color", visuals::box_fill_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+
                 ImGui::Checkbox("Health Bar", &visuals::healthBar);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## Health Bar Color", visuals::healthbar_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+
                 ImGui::Checkbox("Names", &visuals::names);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## Names Color", visuals::names_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+
                 ImGui::Checkbox("Weapon Text", &visuals::weaponText);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## Weapon Text Color", visuals::weapon_text_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                
                 ImGui::Checkbox("Weapon Icon", &visuals::weaponIcon);
+
                 ImGui::Checkbox("Distance", &visuals::distance);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## Distance Color", visuals::distance_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+
                 ImGui::Checkbox("Tracer", &visuals::tracer);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## Tracer Color", visuals::tracer_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
                 ImGui::EndTabItem();
             }
 
             if (ImGui::BeginTabItem("Aim"))
             {
-                ImGui::Text("AimBot");
+                ImGui::Checkbox("AimBot", &aim::aimbot);
+
+                ImGui::Checkbox("Draw FOV", &aim::drawFOV);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## FOV Color", aim::fov_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+
+                ImGui::Checkbox("RCS", &aim::RCS);
                 ImGui::EndTabItem();
             }
 
             if (ImGui::BeginTabItem("Settings"))
             {
                 ImGui::Text("Settings");
+                ImGui::Checkbox("Watermark", &settings::watermark);
+                ImGui::Text("iPA by wurvt");
+                ImGui::Text("v0.0.3b");
+
                 ImGui::EndTabItem();
             }
 
@@ -155,6 +188,8 @@ static bool   g_tLeave = false;
         }
 
         ImGui::End();
+        if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+            g_menuRect = view.bounds;
     } else {
         g_menuRect = CGRectZero;
     }
