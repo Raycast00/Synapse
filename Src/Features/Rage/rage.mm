@@ -198,8 +198,4 @@ void rage::run()
             spreadWasOn = false;
         }
     }
-
-    // визуальная отдача: каждый кадр, камера пересоздаётся
-    if (rage::noRecoil)
-        applyCameraRecoil();
 }
