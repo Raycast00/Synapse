@@ -106,6 +106,10 @@ static bool   g_tLeave = false;
     ImGui_ImplMetal_NewFrame(rpd);
     ImGui::NewFrame();
 
+    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
+
+    aim::run();
+
     // Кнопка вызова меню (всегда видна)
     ImGui::SetNextWindowPos(ImVec2(20, 60), ImGuiCond_FirstUseEver);
     ImGui::Begin("##btn", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
@@ -133,7 +137,7 @@ static bool   g_tLeave = false;
             {
                 ImGui::Text("Esp player");
                 ImGui::Checkbox("Enabled", &visuals::esp_enabled);
-                
+
                 ImGui::SeparatorText("Configuration");
 
                 ImGui::Checkbox("2D Box", &visuals::box2D);
@@ -175,6 +179,7 @@ static bool   g_tLeave = false;
                 ImGui::Checkbox("Draw FOV", &aim::drawFOV);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## FOV Color", aim::fov_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                ImGui::SliderFloat("FOV Radius", &aim::fov_radius, 10.f, 500.f, "%.0f");
 
                 ImGui::Checkbox("RCS", &aim::RCS);
                 ImGui::EndTabItem();

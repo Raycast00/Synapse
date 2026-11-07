@@ -1,5 +1,7 @@
 namespace visuals
 {
+    void run(ImDrawList* drawList, float screenW, float screenH);
+
     inline bool esp_enabled = false;
 
     inline bool box2D = false;
