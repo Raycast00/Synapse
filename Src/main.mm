@@ -194,15 +194,7 @@ static bool   g_tLeave = false;
 
             if (ImGui::BeginTabItem("Rage"))
             {
-                ImGui::Checkbox("No Spread", &aim::aimbot);
-
-                ImGui::Checkbox("Draw FOV", &aim::drawFOV);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## FOV Color", aim::fov_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-                ImGui::SliderFloat("FOV Radius", &aim::fov_radius, 60.f, 180.f, "%.0f");
-
-                ImGui::Checkbox("RCS", &aim::RCS);
-                ImGui::EndTabItem();
+                ImGui::Checkbox("No Spread", &rage::noSpread);
             }
 
             if (ImGui::BeginTabItem("Settings"))

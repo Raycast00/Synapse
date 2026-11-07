@@ -10,11 +10,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Compile dylib
         run: |
+          SRC=$(find Src/main.mm Src/Features -name '*.mm' -o -name '*.cpp')
           xcrun -sdk iphoneos clang++ -arch arm64 -miphoneos-version-min=14.0 -std=c++17 -fobjc-arc -O2 \
             -dynamiclib \
-            -I Src/ImGui -I Src/ImGui/Backends -I Src/Memory \
-            Src/main.mm \
-            Src/Features/Aim/aim.mm \
+            -I Src -I Src/ImGui -I Src/ImGui/Backends -I Src/Memory \
+            $SRC \
             Src/Memory/KittyAsm.cpp \
             Src/Memory/KittyIOFile.cpp \
             Src/Memory/KittyMemory.cpp \
