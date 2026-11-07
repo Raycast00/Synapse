@@ -10,6 +10,7 @@
 #include "Settings/settings.h"
 
 #include "Memory/KittyInclude.hpp"
+#include "il2cpp/IL2CPP_Resolver.hpp"
 
 static bool   g_open = false;
 static CGRect g_btnRect, g_menuRect;
