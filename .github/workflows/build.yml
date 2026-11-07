@@ -12,7 +12,7 @@ jobs:
         run: |
           xcrun -sdk iphoneos clang++ -arch arm64 -miphoneos-version-min=14.0 -std=c++17 -fobjc-arc \
             -dynamiclib \
-            -I Src/ImGui \
+            -I Src/ImGui -I Src/ImGui/Backends \
             Src/main.mm \
             Src/ImGui/imgui.cpp \
             Src/ImGui/imgui_draw.cpp \
