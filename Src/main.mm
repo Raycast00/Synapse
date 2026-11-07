@@ -24,6 +24,7 @@ static bool   g_tRelease = false;
 static bool   g_tLeave = false;
 
 static bool g_il2cppReady = false;
+static bool g_triedInit = false;
 
 @interface OverlayWindow : UIWindow @end
 @implementation OverlayWindow
@@ -88,6 +89,12 @@ static bool g_il2cppReady = false;
 - (void)mtkView:(MTKView *)v drawableSizeWillChange:(CGSize)s {}
 
 - (void)drawInMTKView:(MTKView *)view {
+    if (!g_triedInit)
+    {
+        g_triedInit = true;
+        g_il2cppReady = IL2CPP::Initialize(true, 10, IL2CPP_FRAMEWORK(BINARY_NAME));
+    }
+
     MTLRenderPassDescriptor *rpd = view.currentRenderPassDescriptor;
     if (!rpd) return;
 
@@ -273,6 +280,5 @@ static inline const char* IL2CPP_FRAMEWORK(const char* NAME) {
 }
 
 __attribute__((constructor)) static void init(void) {
-    g_il2cppReady = IL2CPP::Initialize(true, 10, IL2CPP_FRAMEWORK(BINARY_NAME));
     tryInstall();
 }
