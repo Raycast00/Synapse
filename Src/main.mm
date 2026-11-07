@@ -22,6 +22,8 @@ static int    g_tPhase = 0;      // 0 idle, 1 hover frame, 2 send down, 3 held
 static bool   g_tRelease = false;
 static bool   g_tLeave = false;
 
+static bool g_il2cppReady = false;
+
 @interface OverlayWindow : UIWindow @end
 @implementation OverlayWindow
 - (BOOL)canBecomeKeyWindow { return NO; }
@@ -204,6 +206,14 @@ static bool   g_tLeave = false;
                 ImGui::Checkbox("Watermark", &settings::watermark);
                 ImGui::Text("iPA by wurvt");
                 ImGui::Text("v0.0.4b");
+                if (g_il2cppReady)
+                {
+                    ImGui::Text("il2cpp initialized");
+                }
+                else
+                {
+                    ImGui::Text("il2cpp failed to initialize");
+                }
 
                 ImGui::EndTabItem();
             }
@@ -262,6 +272,6 @@ static inline const char* IL2CPP_FRAMEWORK(const char* NAME) {
 }
 
 __attribute__((constructor)) static void init(void) {
-    IL2CPP::Initialize(true, 5, IL2CPP_FRAMEWORK(BINARY_NAME));
+    g_il2cppReady = IL2CPP::Initialize(true, 10, IL2CPP_FRAMEWORK(BINARY_NAME));
     tryInstall();
 }
