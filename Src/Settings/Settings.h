@@ -1,4 +1,4 @@
 namespace settings
 {
-    inline bool watermark = false
+    inline bool watermark = false;
 }
