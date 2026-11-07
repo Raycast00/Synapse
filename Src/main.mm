@@ -10,6 +10,7 @@
 #include "Settings/settings.h"
 
 #include "Memory/KittyInclude.hpp"
+#define IL2CPP_ASSERT(x) ((void)0)
 #include "il2cpp/IL2CPP_Resolver.hpp"
 
 static bool   g_open = false;
