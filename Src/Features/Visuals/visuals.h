@@ -1,6 +1,6 @@
 namespace visuals
 {
-    void run(ImDrawList* drawList, float screenW, float screenH);
+    void run();
 
     inline bool esp_enabled = false;
 
@@ -27,4 +27,7 @@ namespace visuals
     inline bool tracer = false;
     inline float tracer_color[4]{ 1.f, 1.f, 1.f, 1.f };
 
+    // Bomb
+    inline bool bomb_timer_bar = false;
+    inline float bomb_timer_color[4]{ 1.f, 1.f, 1.f, 1.f };
 }

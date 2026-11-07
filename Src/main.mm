@@ -9,6 +9,7 @@
 #include "Settings/Settings.h"
 
 #include "Memory/KittyInclude.hpp"
+#include "il2cpp/IL2CPP_Resolver.hpp"
 
 static bool   g_open = false;
 static CGRect g_btnRect, g_menuRect;
@@ -108,6 +109,7 @@ static bool   g_tLeave = false;
 
     ImDrawList* drawList = ImGui::GetBackgroundDrawList();
 
+    visuals::run();
     aim::run();
 
     // Кнопка вызова меню (всегда видна)
@@ -124,7 +126,7 @@ static bool   g_tLeave = false;
     // Само меню
     if (g_open) {
         ImGui::SetNextWindowPos(ImVec2(120, 60), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(500, 300), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(450, 250), ImGuiCond_FirstUseEver);
 
         ImGui::Begin("Synapse iPA", &g_open);
 
@@ -135,60 +137,45 @@ static bool   g_tLeave = false;
         {
             if (ImGui::BeginTabItem("Visuals"))
             {
-                if (ImGui::BeginTable("visuals_cols", 2,
-                    ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoPadOuterX))
-                {
-                    ImGui::TableNextRow();
+                // ENEMY
+                ImGui::Text("Esp player");
+                ImGui::Checkbox("Enabled", &visuals::esp_enabled);
 
-                    // ---- ЛЕВАЯ КОЛОНКА ----
-                    ImGui::TableSetColumnIndex(0);
-                    ImGui::Text("ESP");
-                    ImGui::Checkbox("Enabled", &visuals::esp_enabled);
-                    ImGui::Separator();
+                ImGui::SeparatorText("Configuration");
 
-                    ImGui::Checkbox("2D Box", &visuals::box2D);
-                    ImGui::SameLine(); ImGui::SetNextItemWidth(40);
-                    ImGui::ColorEdit4("##2DBox", visuals::box_color,
-                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                ImGui::Checkbox("2D Box", &visuals::box2D);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## 2D Box Color", visuals::box_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
 
-                    ImGui::Checkbox("Filled", &visuals::boxFill);
-                    ImGui::SameLine(); ImGui::SetNextItemWidth(40);
-                    ImGui::ColorEdit4("##BoxFill", visuals::box_fill_color,
-                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                ImGui::Checkbox("Box Fill", &visuals::boxFill);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## Box Fill Color", visuals::box_fill_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
 
-                    ImGui::Checkbox("Health Bar", &visuals::healthBar);
-                    ImGui::SameLine(); ImGui::SetNextItemWidth(40);
-                    ImGui::ColorEdit4("##HealthBar", visuals::healthbar_color,
-                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                ImGui::Checkbox("Health Bar", &visuals::healthBar);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## Health Bar Color", visuals::healthbar_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
 
-                    // ---- ПРАВАЯ КОЛОНКА ----
-                    ImGui::TableSetColumnIndex(1);
-                    ImGui::Text("Extra");
-                    ImGui::Checkbox("Names", &visuals::names);
-                    ImGui::SameLine(); ImGui::SetNextItemWidth(40);
-                    ImGui::ColorEdit4("##Names", visuals::names_color,
-                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                ImGui::Checkbox("Names", &visuals::names);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## Names Color", visuals::names_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
 
-                    ImGui::Checkbox("Weapon Text", &visuals::weaponText);
-                    ImGui::SameLine(); ImGui::SetNextItemWidth(40);
-                    ImGui::ColorEdit4("##WeaponText", visuals::weapon_text_color,
-                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                ImGui::Checkbox("Weapon Text", &visuals::weaponText);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## Weapon Text Color", visuals::weapon_text_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                
+                ImGui::Checkbox("Weapon Icon", &visuals::weaponIcon);
 
-                    ImGui::Checkbox("Weapon Icon", &visuals::weaponIcon);
+                ImGui::Checkbox("Distance", &visuals::distance);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## Distance Color", visuals::distance_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
 
-                    ImGui::Checkbox("Distance", &visuals::distance);
-                    ImGui::SameLine(); ImGui::SetNextItemWidth(40);
-                    ImGui::ColorEdit4("##Distance", visuals::distance_color,
-                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-
-                    ImGui::Checkbox("Tracer", &visuals::tracer);
-                    ImGui::SameLine(); ImGui::SetNextItemWidth(40);
-                    ImGui::ColorEdit4("##Tracer", visuals::tracer_color,
-                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-
-                    ImGui::EndTable();
-                }
+                ImGui::Checkbox("Tracer", &visuals::tracer);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## Tracer Color", visuals::tracer_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
                 ImGui::EndTabItem();
+
+                // BOMB
+                ImGui::SeparatorText("Bomb");
             }
 
             if (ImGui::BeginTabItem("Aim"))
@@ -198,7 +185,7 @@ static bool   g_tLeave = false;
                 ImGui::Checkbox("Draw FOV", &aim::drawFOV);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## FOV Color", aim::fov_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-                ImGui::SliderFloat("Radius", &aim::fov_radius, 60.f, 180.f, "%.0f");
+                ImGui::SliderFloat("FOV Radius", &aim::fov_radius, 60.f, 180.f, "%.0f");
 
                 ImGui::Checkbox("RCS", &aim::RCS);
                 ImGui::EndTabItem();
@@ -259,5 +246,7 @@ static void tryInstall(void) {
 }
 
 __attribute__((constructor)) static void init(void) {
+    IL2CPP::Initialize(true, 5, IL2CPP_FRAMEWORK(BINARY_NAME));
+
     tryInstall();
 }
