@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <MetalKit/MetalKit.h>
+#include <float.h>
 #include "imgui.h"
 #include "imgui_impl_metal.h"
 
@@ -9,19 +10,19 @@ static bool   g_open = false;
 static CGRect g_btnRect, g_menuRect;
 static bool   g_checkbox = false;
 
+// touch state: клик уходит в imgui через кадр после hover
+static ImVec2 g_tPos = ImVec2(-FLT_MAX, -FLT_MAX);
+static int    g_tPhase = 0;      // 0 idle, 1 hover frame, 2 send down, 3 held
+static bool   g_tRelease = false;
+static bool   g_tLeave = false;
+
 @interface OverlayWindow : UIWindow @end
 @implementation OverlayWindow
 - (BOOL)canBecomeKeyWindow { return NO; }
 - (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
     if (self.hidden) return nil;
-    
-    // Если меню открыто — блокируем игру полностью (все касания идут в ImGui)
-    if (g_open) {
-        return [super hitTest:p withEvent:e];
-    }
-    
-    // Если меню закрыто — пропускаем касания в игру, КРОМЕ области кнопки "Menu"
-    bool hit = CGRectContainsPoint(g_btnRect, p);
+    // ловим касания только по кнопке и окну меню, остальное идёт в игру
+    bool hit = CGRectContainsPoint(g_btnRect, p) || (g_open && CGRectContainsPoint(g_menuRect, p));
     return hit ? [super hitTest:p withEvent:e] : nil;
 }
 @end
@@ -46,7 +47,7 @@ static bool   g_checkbox = false;
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    
+
     // Styling
     ImGui::GetIO().IniFilename = nullptr;
 
@@ -56,24 +57,24 @@ static bool   g_checkbox = false;
     // Rounding shit
     ImGui::GetStyle().FrameRounding = 3.0f;
     ImGui::StyleColorsLight();
+    ImGui::GetStyle().WindowRounding = 3.0f;
     ImGui::GetStyle().Colors[ImGuiCol_CheckMark] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
 
     ImGui_ImplMetal_Init(dev);
     return self;
 }
 
-- (void)touch:(NSSet *)t down:(BOOL)down {
-    UITouch *touch = [t anyObject];
-    CGPoint p = [touch locationInView:self];
-    ImGuiIO &io = ImGui::GetIO();
-    io.AddMousePosEvent(p.x, p.y);
-    io.AddMouseButtonEvent(0, down);
+- (void)touchesBegan:(NSSet *)t withEvent:(UIEvent *)e {
+    CGPoint p = [[t anyObject] locationInView:self];
+    g_tPos = ImVec2(p.x, p.y);
+    g_tPhase = 1; g_tRelease = false; g_tLeave = false;
 }
-
-- (void)touchesBegan:(NSSet *)t withEvent:(UIEvent *)e     { [self touch:t down:YES]; }
-- (void)touchesMoved:(NSSet *)t withEvent:(UIEvent *)e     { [self touch:t down:YES]; }
-- (void)touchesEnded:(NSSet *)t withEvent:(UIEvent *)e     { [self touch:t down:NO]; }
-- (void)touchesCancelled:(NSSet *)t withEvent:(UIEvent *)e { [self touch:t down:NO]; }
+- (void)touchesMoved:(NSSet *)t withEvent:(UIEvent *)e {
+    CGPoint p = [[t anyObject] locationInView:self];
+    g_tPos = ImVec2(p.x, p.y);
+}
+- (void)touchesEnded:(NSSet *)t withEvent:(UIEvent *)e     { g_tRelease = true; }
+- (void)touchesCancelled:(NSSet *)t withEvent:(UIEvent *)e { g_tRelease = true; }
 
 - (void)mtkView:(MTKView *)v drawableSizeWillChange:(CGSize)s {}
 
@@ -86,6 +87,16 @@ static bool   g_checkbox = false;
     CGFloat s = view.window.screen.scale ?: 3.0;
     io.DisplayFramebufferScale = ImVec2(s, s);
     io.DeltaTime = 1.0f / 60.0f;
+
+    // touch -> imgui: hover кадр, потом down, потом up + уход курсора
+    io.AddMousePosEvent(g_tPos.x, g_tPos.y);
+    if (g_tPhase == 1)      g_tPhase = 2;
+    else if (g_tPhase == 2) { io.AddMouseButtonEvent(0, true); g_tPhase = 3; }
+    else if (g_tPhase == 3 && g_tRelease) {
+        io.AddMouseButtonEvent(0, false);
+        g_tRelease = false; g_tPhase = 0; g_tLeave = true;
+    }
+    else if (g_tLeave) { g_tPos = ImVec2(-FLT_MAX, -FLT_MAX); g_tLeave = false; }
 
     id<MTLCommandBuffer> cb = [self.queue commandBuffer];
     ImGui_ImplMetal_NewFrame(rpd);
@@ -105,13 +116,12 @@ static bool   g_checkbox = false;
     // Само меню
     if (g_open) {
         ImGui::SetNextWindowPos(ImVec2(120, 60), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(260, 160), ImGuiCond_FirstUseEver);
-
-        if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
-            ImGui::SetNextWindowFocus();
-        }
+        ImGui::SetNextWindowSize(ImVec2(325, 190), ImGuiCond_FirstUseEver);
 
         ImGui::Begin("Synapse IPA", &g_open);
+
+        ImVec2 wp = ImGui::GetWindowPos(), ws = ImGui::GetWindowSize();
+        g_menuRect = CGRectInset(CGRectMake(wp.x, wp.y, ws.x, ws.y), -8, -8);
 
         if (ImGui::BeginTabBar("Tabs"))
         {
@@ -145,6 +155,8 @@ static bool   g_checkbox = false;
         }
 
         ImGui::End();
+    } else {
+        g_menuRect = CGRectZero;
     }
 
     ImGui::Render();
