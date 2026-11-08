@@ -59,7 +59,7 @@ static bool   g_tLeave = false;
     ImGui::GetIO().IniFilename = nullptr;
 
     ImGui::GetIO().FontGlobalScale = 0.95f;
-    ImGui::GetStyle().ScaleAllSizes(1.0f);
+    ImGui::GetStyle().ScaleAllSizes(1.5f);
 
     // Rounding shit
     ImGui::GetStyle().FrameRounding = 3.0f;
@@ -129,7 +129,7 @@ static bool   g_tLeave = false;
     // Само меню
     if (g_open) {
         ImGui::SetNextWindowPos(ImVec2(120, 60), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(450, 250), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(450, 325), ImGuiCond_FirstUseEver);
 
         ImGui::Begin("Synapse iPA", &g_open);
 
