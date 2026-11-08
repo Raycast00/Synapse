@@ -58,13 +58,13 @@ static bool   g_tLeave = false;
     ImGui::GetIO().IniFilename = nullptr;
 
     ImGui::GetIO().FontGlobalScale = 0.95f;
-    ImGui::GetStyle().ScaleAllSizes(1.5f);
+    ImGui::GetStyle().ScaleAllSizes(1.75f);
 
     // Rounding shit
     ImGui::GetStyle().FrameRounding = 3.0f;
     ImGui::StyleColorsLight();
     ImGui::GetStyle().WindowRounding = 5.0f;
-    ImGui::GetStyle().ScrollbarSize = 8.5f;
+    ImGui::GetStyle().ScrollbarSize = 10.f;
     ImGui::GetStyle().Colors[ImGuiCol_CheckMark] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
 
     ImGui_ImplMetal_Init(dev);
