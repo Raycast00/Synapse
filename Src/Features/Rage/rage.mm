@@ -113,15 +113,37 @@ void rage::run()
 {
     if (!IL2CPP::Init()) return;
 
-    if (rage::infinityAmmo)
-    {
-        static void* armsKlass = IL2CPP::Class("", "ArmsController");
-        auto armsList = IL2CPP::FindObjectsOfType(armsKlass);
+    if (rage::infinityAmmo) {
+        static void* wpKlass = IL2CPP::Class("", "WeaponParameters");
+        static void* getAmmM  = IL2CPP::Method(wpKlass, "get_Ammunition", 0);
+        if (!getAmmM) return;
 
-        for (auto arms : armsList)
-        {
-            short cap = Read<short>(arms + 0x1BA);
-            if (cap > 0) Write<short>(arms + 0x1B8, cap);
+        // кэш всех WeaponParameters (они статичные ScriptableObject, не пересоздаются)
+        static std::vector<uintptr_t> weapons;
+        static bool loaded = false;
+        if (!loaded) {
+            loaded = true;
+            static void* catalogKlass = IL2CPP::Class("", "WeaponCatalog");
+            static void* getM = IL2CPP::Method(catalogKlass, "Get", 1);
+            const uint8_t ids[] = {0,1,2,3,9,11,12,15,16,17,24,25,28,29,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49};
+            for (uint8_t id : ids) {
+                void* args[1] = { &id };
+                uintptr_t wp = (uintptr_t)IL2CPP::Invoke(getM, nullptr, args);
+                if (ValidPtr(wp)) weapons.push_back(wp);
+            }
+        }
+
+        for (auto wp : weapons) {
+            void* amm = IL2CPP::Invoke(getAmmM, (void*)wp, nullptr);
+            if (!ValidPtr((uintptr_t)amm)) continue;
+            short cap = Read<short>((uintptr_t)amm + 0x12);
+            if (cap <= 0 || cap > 500) continue;
+            short mag = Read<short>((uintptr_t)amm + 0x10);
+            if (mag > 0 && mag <= cap) {
+                // уже полный, ничего не делаем
+            } else {
+                Write<short>((uintptr_t)amm + 0x10, cap);
+            }
         }
     }
 
