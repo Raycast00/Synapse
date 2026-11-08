@@ -11,14 +11,14 @@ template <typename T>
 inline T Read(uintptr_t addr)
 {
     T out{};
-    KittyMemory::memRead((const void*)addr, &out, sizeof(T));
+    KittyMemory::memRead(addr, &out, sizeof(T));
     return out;
 }
 
 template <typename T>
 inline bool Write(uintptr_t addr, T value)
 {
-    return KittyMemory::memWrite((void*)addr, &value, sizeof(T));
+    return KittyMemory::memWrite(addr, &value, sizeof(T));
 }
 
 // ---------- il2cpp api ----------
