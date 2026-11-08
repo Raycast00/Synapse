@@ -113,6 +113,18 @@ void rage::run()
 {
     if (!IL2CPP::Init()) return;
 
+    if (rage::infinityAmmo)
+    {
+        static void* armsKlass = IL2CPP::Class("", "ArmsController");
+        auto armsList = IL2CPP::FindObjectsOfType(armsKlass);
+
+        for (auto arms : armsList)
+        {
+            short cap = IL2CPP:Read<short>(arms + 0x1BA);
+            if (cap > 0) IL2CPP:Write<short>(arms + 0x1B8, cap);
+        }
+    }
+
     static bool once = false;
     if (!once) {
         once = true;
