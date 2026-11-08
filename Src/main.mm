@@ -63,8 +63,8 @@ static bool   g_tLeave = false;
     // Rounding shit
     ImGui::GetStyle().FrameRounding = 3.0f;
     ImGui::StyleColorsLight();
-    ImGui::GetStyle().WindowRounding = 3.0f;
-    ImGui::GetStyle().ScrollbarSize = 13.0f;
+    ImGui::GetStyle().WindowRounding = 5.0f;
+    ImGui::GetStyle().ScrollbarSize = 8.5f;
     ImGui::GetStyle().Colors[ImGuiCol_CheckMark] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
 
     ImGui_ImplMetal_Init(dev);
@@ -129,7 +129,7 @@ static bool   g_tLeave = false;
     // Само меню
     if (g_open) {
         ImGui::SetNextWindowPos(ImVec2(120, 60), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(500, 350), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(470, 300), ImGuiCond_FirstUseEver);
 
         ImGui::Begin("Synapse iPA", &g_open);
 
@@ -154,8 +154,9 @@ static bool   g_tLeave = false;
                     ImGui::Checkbox("Filled", &visuals::boxFill);
                     ImGui::SameLine();
                     ImGui::ColorEdit4("## Box Fill Color", visuals::box_fill_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+
+                    ImGui::Combo("Box Type", &visuals::current_box_type, visuals::box_type, IM_ARRAYSIZE(visuals::box_type));
                 }
-                ImGui::Combo("Box Type", &visuals::current_box_type, visuals::box_type, IM_ARRAYSIZE(visuals::box_type));
 
                 ImGui::Checkbox("Health Bar", &visuals::healthBar);
                 ImGui::SameLine();
@@ -206,11 +207,7 @@ static bool   g_tLeave = false;
                 ImGui::SliderFloat("FOV Radius", &aim::fov_radius, 60.f, 180.f, "%.0f");
 
                 ImGui::Checkbox("FOV Check", &aim::fovCheck);
-
-                if (aim::silent)
-                {
-                    ImGui::Combo("Hitbox", &aim::current_silent_hitbox, aim::silent_hitboxes, IM_ARRAYSIZE(aim::silent_hitboxes));
-                }
+                ImGui::Combo("Hitbox", &aim::current_aimbot_hitbox, aim::aimbot_hitboxes, IM_ARRAYSIZE(aim::aimbot_hitboxes));
                 
                 ImGui::Checkbox("RCS", &aim::RCS);
                 ImGui::EndTabItem();

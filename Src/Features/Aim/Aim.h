@@ -7,8 +7,8 @@ namespace aim
 
     inline float aimbot_smoothness = 5.f;
 
-    inline int current_silent_hitbox = 0;
-    inline const char* silent_hitboxes[] = { "Head", "Chest", "Random" };
+    inline int current_aimbot_hitbox = 0;
+    inline const char* aimbot_hitboxes[] = { "Head", "Chest", "Random" };
 
     inline bool drawFOV = false;
     inline float fov_radius = 180.f;
