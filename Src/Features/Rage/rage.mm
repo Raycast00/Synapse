@@ -7,18 +7,21 @@
 #include <chrono>
 
 // ---------- memory helpers ----------
+static inline bool ok(uintptr_t p) { return p > 0x100000000ULL && p < 0x1000000000000ULL; }
+
 template <typename T>
 inline T Read(uintptr_t addr)
 {
-    T out{};
-    KittyMemory::memRead(addr, &out, sizeof(T));
-    return out;
+    if (!ok(addr)) return T{};
+    return *(T*)addr;
 }
 
 template <typename T>
 inline bool Write(uintptr_t addr, T value)
 {
-    return KittyMemory::memWrite(addr, &value, sizeof(T));
+    if (!ok(addr)) return false;
+    *(T*)addr = value;
+    return true;
 }
 
 // ---------- il2cpp api ----------
@@ -135,57 +138,71 @@ namespace off {
 }
 
 // ---------- spread / recoil ----------
-struct SavedWeapon {
+struct Orig {
     float pellet, scoped, horiz, vert, air[off::airFloats];
     int   edge;
 };
-static std::unordered_map<uintptr_t, SavedWeapon> g_saved;
+static std::unordered_map<uintptr_t, Orig> g_orig;
+static std::vector<uintptr_t> g_weapons;
 
-static void applySpread(uintptr_t wp, bool enable)
+// только огнестрел, без ножей и гранат: для несуществующих id Get может кидать исключение
+static const uint8_t kGuns[] = {
+    0,1,2,3,9,11,12,15,16,17,24,25,28,29,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49
+};
+
+static void refreshWeapons()
+{
+    g_weapons.clear();
+    for (uint8_t id : kGuns) {
+        uintptr_t wp = il2cpp::catalogGet(id);
+        if (ok(wp)) g_weapons.push_back(wp);
+    }
+}
+
+static void applyWeapon(uintptr_t wp, bool spread, bool recoil)
 {
     uintptr_t air = Read<uintptr_t>(wp + off::airInaccuracy);
     uintptr_t rp  = Read<uintptr_t>(wp + off::recoilParams);
 
-    if (enable) {
-        if (!g_saved.count(wp)) {                       // оригиналы сохраняем один раз
-            SavedWeapon s{};
-            s.pellet = Read<float>(wp + off::pelletSpread);
-            s.scoped = Read<float>(wp + off::scopedMoveInacc);
-            s.edge   = Read<int>(wp + off::edgeSpreadShots);
-            if (rp)  { s.horiz = Read<float>(rp + off::horizRange); s.vert = Read<float>(rp + off::vertRange); }
-            if (air) for (int i = 0; i < off::airFloats; i++) s.air[i] = Read<float>(air + off::airStart + i * 4);
-            g_saved[wp] = s;
-        }
-        Write<float>(wp + off::pelletSpread, 0.f);
-        Write<float>(wp + off::scopedMoveInacc, 0.f);
-        Write<int>(wp + off::edgeSpreadShots, 0);
-        if (rp)  { Write<float>(rp + off::horizRange, 0.f); Write<float>(rp + off::vertRange, 0.f); }
-        if (air) for (int i = 0; i < off::airFloats; i++) Write<float>(air + off::airStart + i * 4, 0.f);
-    } else {
-        auto it = g_saved.find(wp);
-        if (it == g_saved.end()) return;
-        const SavedWeapon& s = it->second;
-        Write<float>(wp + off::pelletSpread, s.pellet);
-        Write<float>(wp + off::scopedMoveInacc, s.scoped);
-        Write<int>(wp + off::edgeSpreadShots, s.edge);
-        if (rp)  { Write<float>(rp + off::horizRange, s.horiz); Write<float>(rp + off::vertRange, s.vert); }
-        if (air) for (int i = 0; i < off::airFloats; i++) Write<float>(air + off::airStart + i * 4, s.air[i]);
-        g_saved.erase(it);
+    if (!g_orig.count(wp)) {                       // оригиналы сохраняем один раз
+        Orig o{};
+        o.pellet = Read<float>(wp + off::pelletSpread);
+        o.scoped = Read<float>(wp + off::scopedMoveInacc);
+        o.edge   = Read<int>(wp + off::edgeSpreadShots);
+        if (ok(rp))  { o.horiz = Read<float>(rp + off::horizRange); o.vert = Read<float>(rp + off::vertRange); }
+        if (ok(air)) for (int i = 0; i < off::airFloats; i++) o.air[i] = Read<float>(air + off::airStart + i * 4);
+        g_orig[wp] = o;
     }
-}
+    const Orig& o = g_orig[wp];
 
-static void forEachWeapon(bool enable)
-{
-    for (int id = 0; id <= 52; id++) {
-        uintptr_t wp = il2cpp::catalogGet((uint8_t)id);
-        if (wp) applySpread(wp, enable);
+    // галка включена -> 0, выключена -> оригинал
+    Write<float>(wp + off::pelletSpread,   spread ? 0.f : o.pellet);
+    Write<float>(wp + off::scopedMoveInacc, spread ? 0.f : o.scoped);
+    Write<int>(wp + off::edgeSpreadShots,  spread ? 0   : o.edge);
+    if (ok(air))
+        for (int i = 0; i < off::airFloats; i++)
+            Write<float>(air + off::airStart + i * 4, spread ? 0.f : o.air[i]);
+    if (ok(rp)) {
+        Write<float>(rp + off::horizRange, recoil ? 0.f : o.horiz);
+        Write<float>(rp + off::vertRange,  recoil ? 0.f : o.vert);
     }
 }
 
 static void applyCameraRecoil()
 {
     uintptr_t cam = il2cpp::fpsCamera();
-    if (!cam) return;
+
+    static bool logged = false;
+    if (!logged) {
+        logged = true;
+        NSLog(@"[rage] cam=%p kickBack=%f punchPitch=%f punchShotPitch=%f",
+              (void*)cam,
+              ok(cam) ? Read<float>(cam + 0x3C) : -1.f,
+              ok(cam) ? Read<float>(cam + 0x4C) : -1.f,
+              ok(cam) ? Read<float>(cam + 0x58) : -1.f);
+    }
+
+    if (!ok(cam)) return;
     for (uintptr_t o : off::camKick)
         Write<float>(cam + o, 0.f);
 }
@@ -201,26 +218,27 @@ void rage::run()
         once = true;
         uintptr_t ak = il2cpp::catalogGet(9);   // AK47
         NSLog(@"[rage] ak=%p", (void*)ak);
-        if (ak) {
+        if (ok(ak))
             NSLog(@"[rage] range=%f pellet=%f edge=%d",
                   Read<float>(ak + 0x90), Read<float>(ak + off::pelletSpread),
                   Read<int>(ak + off::edgeSpreadShots));
-        }
     }
 
-    static bool spreadWasOn = false;
-    static auto last = std::chrono::steady_clock::now();
-    auto now = std::chrono::steady_clock::now();
-
-    // конфиги трогаем раз в секунду
-    if (now - last > std::chrono::seconds(1)) {
-        last = now;
-        if (rage::noSpread) {
-            forEachWeapon(true);
-            spreadWasOn = true;
-        } else if (spreadWasOn) {
-            forEachWeapon(false);               // вернуть оригиналы
-            spreadWasOn = false;
+    // конфиги трогаем только при смене галок
+    static bool lastSpread = false, lastRecoil = false, pending = false;
+    if (rage::noSpread != lastSpread || rage::noRecoil != lastRecoil) {
+        lastSpread = rage::noSpread;
+        lastRecoil = rage::noRecoil;
+        pending = true;
+    }
+    if (pending) {
+        refreshWeapons();
+        if (!g_weapons.empty()) {
+            for (uintptr_t wp : g_weapons)
+                applyWeapon(wp, rage::noSpread, rage::noRecoil);
+            NSLog(@"[rage] applied to %d weapons (spread=%d recoil=%d)",
+                  (int)g_weapons.size(), (int)rage::noSpread, (int)rage::noRecoil);
+            pending = false;
         }
     }
 
