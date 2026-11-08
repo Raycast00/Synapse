@@ -222,6 +222,7 @@ static bool   g_tLeave = false;
 
             if (ImGui::BeginTabItem("Rage"))
             {
+                ImGui::Checkbox("Infinity Ammo", &rage::infinityAmmo);
                 ImGui::Checkbox("No Recoil", &rage::noRecoil);
                 ImGui::Checkbox("No Spread", &rage::noSpread);
                 ImGui::EndTabItem();
