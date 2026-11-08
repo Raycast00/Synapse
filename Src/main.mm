@@ -118,7 +118,7 @@ static bool   g_tLeave = false;
 
     ImDrawList* drawList = ImGui::GetBackgroundDrawList();
 
-    //visuals::run();
+    visuals::run();
     aim::run();
     rage::run();
 
