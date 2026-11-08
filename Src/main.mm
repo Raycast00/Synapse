@@ -64,6 +64,7 @@ static bool   g_tLeave = false;
     ImGui::GetStyle().FrameRounding = 3.0f;
     ImGui::StyleColorsLight();
     ImGui::GetStyle().WindowRounding = 3.0f;
+    ImGui::GetStyle().ScrollbarSize = 13.0f;
     ImGui::GetStyle().Colors[ImGuiCol_CheckMark] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
 
     ImGui_ImplMetal_Init(dev);
@@ -128,7 +129,7 @@ static bool   g_tLeave = false;
     // Само меню
     if (g_open) {
         ImGui::SetNextWindowPos(ImVec2(120, 60), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(450, 325), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(500, 350), ImGuiCond_FirstUseEver);
 
         ImGui::Begin("Synapse iPA", &g_open);
 
@@ -144,17 +145,26 @@ static bool   g_tLeave = false;
 
                 ImGui::SeparatorText("Enemy");
 
-                ImGui::Checkbox("2D Box", &visuals::box2D);
+                ImGui::Checkbox("Box", &visuals::box2D);
                 ImGui::SameLine();
-                ImGui::ColorEdit4("## 2D Box Color", visuals::box_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-
-                ImGui::Checkbox("Box Fill", &visuals::boxFill);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## Box Fill Color", visuals::box_fill_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                ImGui::ColorEdit4("## Box Color", visuals::box_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                if (visuals::box2D)
+                {
+                    ImGui::SameLine();
+                    ImGui::Checkbox("Filled", &visuals::boxFill);
+                    ImGui::SameLine();
+                    ImGui::ColorEdit4("## Box Fill Color", visuals::box_fill_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                }
+                ImGui::Combo("Box Type", &visuals::current_box_type, visuals::box_type, IM_ARRAYSIZE(visuals::box_type));
 
                 ImGui::Checkbox("Health Bar", &visuals::healthBar);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## Health Bar Color", visuals::healthbar_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                if (visuals::healthBar)
+                {
+                    ImGui::SameLine();
+                    ImGui::Checkbox("Show Text", &visuals::healthBarText);
+                }
 
                 ImGui::Checkbox("Names", &visuals::names);
                 ImGui::SameLine();
