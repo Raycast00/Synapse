@@ -192,12 +192,26 @@ static bool   g_tLeave = false;
             if (ImGui::BeginTabItem("Aim"))
             {
                 ImGui::Checkbox("AimBot", &aim::aimbot);
+                if (aim::aimbot)
+                {
+                    ImGui::SameLine();
+                    ImGui::Checkbox("Silent", &aim::silent);
+
+                    ImGui::SliderFloat("Smoothness", &aim::aimbot_smoothness, 0.f, 5.f, "%.0f");
+                }
 
                 ImGui::Checkbox("Draw FOV", &aim::drawFOV);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## FOV Color", aim::fov_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
                 ImGui::SliderFloat("FOV Radius", &aim::fov_radius, 60.f, 180.f, "%.0f");
 
+                ImGui::Checkbox("FOV Check", &aim::fovCheck);
+
+                if (aim::silent)
+                {
+                    ImGui::Combo("Hitbox", &visuals::current_silent_hitbox, visuals::silent_hitboxes, IM_ARRAYSIZE(visuals::silent_hitboxes));
+                }
+                
                 ImGui::Checkbox("RCS", &aim::RCS);
                 ImGui::EndTabItem();
             }
