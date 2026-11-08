@@ -58,7 +58,7 @@ static bool   g_tLeave = false;
     ImGui::GetIO().IniFilename = nullptr;
 
     ImGui::GetIO().FontGlobalScale = 0.95f;
-    ImGui::GetStyle().ScaleAllSizes(1.25f);
+    ImGui::GetStyle().ScaleAllSizes(1.5f);
 
     // Rounding shit
     ImGui::GetStyle().FrameRounding = 3.0f;
