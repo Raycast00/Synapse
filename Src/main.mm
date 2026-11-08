@@ -63,7 +63,7 @@ static bool   g_tLeave = false;
     ImGui::GetStyle().FrameRounding = 3.0f;
     ImGui::StyleColorsLight();
     ImGui::GetStyle().WindowRounding = 5.5f;
-    ImGui::GetStyle().ScrollbarSize = 13.5f;
+    ImGui::GetStyle().ScrollbarSize = 14.f;
 
     ImGui::GetStyle().Colors[ImGuiCol_CheckMark] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
     ImGui::GetStyle().Colors[ImGuiCol_TabSelectedOverline] = ImVec4(0, 0, 0, 0);
@@ -212,7 +212,6 @@ static bool   g_tLeave = false;
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## FOV Color", aim::fov_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
                 ImGui::SliderFloat("FOV Radius", &aim::fov_radius, 60.f, 180.f, "%.0f");
-                ImGui::DragFloat("FOV Radius (DragFloat)", &aim::fov_radius, 0.2f, 60.f, 180.f, "%.1f");
 
                 ImGui::Checkbox("FOV Check", &aim::fovCheck);
                 ImGui::Combo("Hitbox", &aim::current_aimbot_hitbox, aim::aimbot_hitboxes, IM_ARRAYSIZE(aim::aimbot_hitboxes));
@@ -232,6 +231,7 @@ static bool   g_tLeave = false;
             {
                 ImGui::Text("Settings");
                 ImGui::Checkbox("Watermark", &settings::watermark);
+                ImGui::Checkbox("Overlay", &settings::overlay);
                 ImGui::Text("iPA by wurvt");
                 ImGui::Text("v0.0.4b");
 
