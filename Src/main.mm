@@ -57,15 +57,23 @@ static bool   g_tLeave = false;
     // Styling
     ImGui::GetIO().IniFilename = nullptr;
 
-    ImGui::GetIO().FontGlobalScale = 0.95f;
+    ImGui::GetIO().FontGlobalScale = 1.15f;
     ImGui::GetStyle().ScaleAllSizes(1.75f);
 
     // Rounding shit
     ImGui::GetStyle().FrameRounding = 3.0f;
     ImGui::StyleColorsLight();
     ImGui::GetStyle().WindowRounding = 5.0f;
-    ImGui::GetStyle().ScrollbarSize = 10.f;
+    ImGui::GetStyle().ScrollbarSize = 12.5f;
+
     ImGui::GetStyle().Colors[ImGuiCol_CheckMark] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
+    ImGui::GetStyle().Colors[ImGuiCol_TabSelectedOverline] = ImVec4(0, 0, 0, 0);
+    ImGui::GetStyle().Colors[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0, 0, 0, 0);
+
+    ImGui::GetStyle().TabBarBorderSize = 0.0f;
+    
+    ImVec4 bgColor = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+    ImGui::GetStyle().Colors[ImGuiCol_WindowBg] = ImVec4(0.94f, 0.94f, 0.94f, 0.85f); 
 
     ImGui_ImplMetal_Init(dev);
     return self;
