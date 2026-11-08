@@ -73,7 +73,7 @@ static bool   g_tLeave = false;
     ImGui::GetStyle().TabBarBorderSize = 0.0f;
 
     ImVec4 bgColor = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
-    ImGui::GetStyle().Colors[ImGuiCol_WindowBg] = ImVec4(0.94f, 0.94f, 0.94f, 0.85f); 
+    ImGui::GetStyle().Colors[ImGuiCol_WindowBg] = ImVec4(0.97f, 0.97f, 0.97f, 0.95f); 
 
     ImGui_ImplMetal_Init(dev);
     return self;
