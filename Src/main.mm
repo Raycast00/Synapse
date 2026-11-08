@@ -57,8 +57,8 @@ static bool   g_tLeave = false;
     // Styling
     ImGui::GetIO().IniFilename = nullptr;
 
-    ImGui::GetIO().FontGlobalScale = 1.15f;
-    ImGui::GetStyle().ScaleAllSizes(1.75f);
+    ImGui::GetIO().FontGlobalScale = 1.f;
+    ImGui::GetStyle().ScaleAllSizes(1.35f);
 
     // Rounding shit
     ImGui::GetStyle().FrameRounding = 3.0f;
@@ -71,7 +71,7 @@ static bool   g_tLeave = false;
     ImGui::GetStyle().Colors[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0, 0, 0, 0);
 
     ImGui::GetStyle().TabBarBorderSize = 0.0f;
-    
+
     ImVec4 bgColor = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
     ImGui::GetStyle().Colors[ImGuiCol_WindowBg] = ImVec4(0.94f, 0.94f, 0.94f, 0.85f); 
 
