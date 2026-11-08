@@ -120,8 +120,8 @@ void rage::run()
 
         for (auto arms : armsList)
         {
-            short cap = IL2CPP:Read<short>(arms + 0x1BA);
-            if (cap > 0) IL2CPP:Write<short>(arms + 0x1B8, cap);
+            short cap = Read<short>(arms + 0x1BA);
+            if (cap > 0) Write<short>(arms + 0x1B8, cap);
         }
     }
 
