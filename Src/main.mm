@@ -10,8 +10,7 @@
 #include "Settings/settings.h"
 
 #include "Memory/KittyInclude.hpp"
-#define IL2CPP_ASSERT(x) ((void)0)
-#include "il2cpp/IL2CPP_Resolver.hpp"
+//#include "il2cpp/IL2CPP_Resolver.hpp"
 
 static bool   g_open = false;
 static CGRect g_btnRect, g_menuRect;
@@ -59,7 +58,7 @@ static bool   g_tLeave = false;
     ImGui::GetIO().IniFilename = nullptr;
 
     ImGui::GetIO().FontGlobalScale = 0.95f;
-    ImGui::GetStyle().ScaleAllSizes(1.5f);
+    ImGui::GetStyle().ScaleAllSizes(1.25f);
 
     // Rounding shit
     ImGui::GetStyle().FrameRounding = 3.0f;
@@ -113,7 +112,7 @@ static bool   g_tLeave = false;
 
     //visuals::run();
     aim::run();
-    //rage::run();
+    rage::run();
 
     // Кнопка вызова меню (всегда видна)
     ImGui::SetNextWindowPos(ImVec2(20, 60), ImGuiCond_FirstUseEver);
@@ -195,6 +194,7 @@ static bool   g_tLeave = false;
 
             if (ImGui::BeginTabItem("Rage"))
             {
+                ImGui::Checkbox("No Recoil", &rage::noRecoil);
                 ImGui::Checkbox("No Spread", &rage::noSpread);
                 ImGui::EndTabItem();
             }
