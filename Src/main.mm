@@ -209,7 +209,7 @@ static bool   g_tLeave = false;
 
                 if (aim::silent)
                 {
-                    ImGui::Combo("Hitbox", &visuals::current_silent_hitbox, visuals::silent_hitboxes, IM_ARRAYSIZE(visuals::silent_hitboxes));
+                    ImGui::Combo("Hitbox", &aim::current_silent_hitbox, aim::silent_hitboxes, IM_ARRAYSIZE(aim::silent_hitboxes));
                 }
                 
                 ImGui::Checkbox("RCS", &aim::RCS);
