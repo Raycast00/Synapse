@@ -16,4 +16,7 @@ namespace rage
 
     inline bool super_jump = false;
     inline float jump_strength = 200.f;
+
+    inline bool no_fall_damage = false;
+    inline bool godmode = false;
 }

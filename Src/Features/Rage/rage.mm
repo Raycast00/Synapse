@@ -194,6 +194,34 @@ static void applySuperJump()
     Write<float>(mv + 0x20, rage::jump_strength);
 }
 
+static void applyNoFallDamage()
+{
+    uintptr_t pc = localPlayerController();
+    if (!ok(pc)) return;
+    uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement);
+    if (!ok(mv)) return;
+    
+    Write<float>(mv + 0xB8, 0.0f);
+    Write<float>(mv + 0xB4, 0.0f);
+}
+
+static void applyGodmode()
+{
+    uintptr_t pc = localPlayerController();
+    if (!ok(pc)) return;
+    uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement);
+    if (!ok(mv)) return;
+    
+    if (rage::godmode)
+    {
+        Write<float>(mv + 0x1B0, 999999.0f); 
+    }
+    else
+    {
+        Write<float>(mv + 0x1B0, 100.0f); 
+    }
+}
+
 static void drawStatus(bool ilReady)
 {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
@@ -254,4 +282,6 @@ void rage::run()
     if (rage::MBT)           applyMBT();
     if (rage::air_jump)      applyAirJump();
     if (rage::super_jump)    applySuperJump();
+    if (rage::no_fall_damage) applyNoFallDamage();
+    if (rage::godmode)       applyGodmode();
 }

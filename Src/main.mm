@@ -247,6 +247,8 @@ static bool   g_tLeave = false;
                 ImGui::Checkbox("Air Jump", &rage::air_jump);
                 ImGui::Checkbox("Super Jump", &rage::super_jump);
                 ImGui::SliderFloat("Jump Strength", &rage::jump_strength, 1.f, 20.f, "%.1f");
+                ImGui::Checkbox("No Fall Damage", &rage::no_fall_damage);
+                ImGui::Checkbox("Godmode", &rage::godmode);
 
                 ImGui::SeparatorText("Weapon");
 
