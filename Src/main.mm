@@ -221,7 +221,8 @@ static bool   g_tLeave = false;
                 ImGui::Checkbox("RCS", &aim::RCS);
 
                 ImGui::SeparatorText("Anti Aim");
-                ImGui::Checkbox("Enabled", &aim::drawFOV);
+                
+                ImGui::Checkbox("Enabled", &aim::anti_aim);
                 ImGui::SliderFloat("Pitch", &aim::anti_pitch, -90.f, 180.f, "%.1f");
                 ImGui::SliderFloat("Yaw", &aim::anti_yaw, -90.f, 90.f, "%.1f");
 
