@@ -427,7 +427,7 @@ void visuals::run()
             float d = std::sqrt((p.x - F.localPos.x) * (p.x - F.localPos.x) +
                                 (p.y - F.localPos.y) * (p.y - F.localPos.y) +
                                 (p.z - F.localPos.z) * (p.z - F.localPos.z));
-            char t[24]; std::snprintf(t, sizeof t, "%.0f u", d);
+            char t[24]; std::snprintf(t, sizeof t, "%.0f m", d);
             Text(dl, ImVec2(sf.x, botY), Col(distance_color), t, true);
         }
         if (tracer) dl->AddLine(ImVec2(disp.x * 0.5f, disp.y), sf, Col(tracer_color));
