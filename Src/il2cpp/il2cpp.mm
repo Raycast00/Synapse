@@ -185,7 +185,7 @@ std::vector<uintptr_t> FindObjectsOfType(void* klass)
     void* typeArg = Type(klass);
     if (!typeArg) return out;
 
-    void* args[1] = { &typeArg };
+    void* args[1] = { typeArg };
     uintptr_t arr = (uintptr_t)Invoke(findMethod, nullptr, args);   // массив — ссылочный тип, НЕ упакован
     if (!ValidPtr(arr)) return out;
 
