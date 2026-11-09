@@ -15,8 +15,9 @@ namespace
     struct V3     { float x, y, z; };
     struct Bounds { V3 center; V3 extents; };
 
+    constexpr bool kStatus = true;   // строка диагностики на экране; false = выключить
+
     // Источник: dump.cs, присланный пользователем (Assembly-CSharp, PhotonRealtime).
-    // Это оффсеты полей экземпляра от начала объекта (заголовок Il2CppObject = 0x10 уже учтён в дампе).
     namespace Cfg
     {
         constexpr uintptr_t PC_MainCamera  = 0x30;  // PlayerController._mainCamera
@@ -24,18 +25,19 @@ namespace
         constexpr uintptr_t PC_IsDeath     = 0xA8;  // PlayerController._isDeath
         constexpr uintptr_t Player_IsLocal = 0x1C;  // Photon.Realtime.Player.IsLocal
         constexpr uintptr_t Player_Nick    = 0x20;  // Photon.Realtime.Player.nickName
-        constexpr uintptr_t Skel_Body      = 0x60;  // PlayerSkeleton._body (SkinnedMeshRenderer)
+        constexpr uintptr_t Skel_Body      = 0x60;  // PlayerSkeleton._body
+        constexpr uintptr_t Skel_BodyLod   = 0x68;  // PlayerSkeleton._bodyLod
         constexpr uintptr_t Bomb_IsActive  = 0x18;  // Bomb._isActive
 
-        constexpr double RefreshInterval = 0.20;    // период пересборки списка игроков, сек
-        constexpr float  BoxWidthRatio   = 0.50f;   // ширина бокса = высота * ratio (подбирается глазами)
-        constexpr float  MaxHealth       = 100.f;   // НЕ проверено по дампу: макс. HP для полоски
+        constexpr double RefreshInterval = 0.20;
+        constexpr float  BoxWidthRatio   = 0.50f;
+        constexpr float  MaxHealth       = 100.f;   // не проверено по дампу
     }
 
-    // ---- API Unity (всё из UnityEngine.CoreModule по dump.cs) ----
     struct Api
     {
         bool ready = false;
+        std::string missing;
         void *kPlayerController{}, *kPlayer{}, *kSkeleton{}, *kBomb{};
         void *mGetTransform{}, *mGetPosition{}, *mW2S{}, *mCamMain{};
         void *mGetBounds{}, *mGetCompInChildren{}, *mObjGetName{};
@@ -46,7 +48,9 @@ namespace
     bool ResolveApi()
     {
         if (A.ready) return true;
+        A.missing.clear();
         const char* core = "UnityEngine.CoreModule";
+        auto need = [&](void* p, const char* n) { if (!p) { A.missing += n; A.missing += ' '; } };
 
         A.kPlayerController = il::Class("", "PlayerController", "Assembly-CSharp");
         A.kSkeleton         = il::Class("", "PlayerSkeleton", "Assembly-CSharp");
@@ -61,7 +65,7 @@ namespace
         void* kObject    = il::Class("UnityEngine", "Object", core);
 
         A.mGetTransform      = il::Method(kComponent, "get_transform", 0);
-        A.mGetCompInChildren = il::Method(kComponent, "GetComponentInChildren", 2); // (Type, bool)
+        A.mGetCompInChildren = il::Method(kComponent, "GetComponentInChildren", 2);
         A.mGetPosition       = il::Method(kTransform, "get_position", 0);
         A.mW2S               = il::Method(kCamera, "WorldToScreenPoint", 1);
         A.mCamMain           = il::Method(kCamera, "get_main", 0);
@@ -74,14 +78,18 @@ namespace
         A.mSkelWeapon        = il::Method(A.kSkeleton, "get_Weapon", 0);
         A.mBombTimeLeft      = il::Method(A.kBomb, "get_TimeLeft", 0);
 
-        A.ready = A.kPlayerController && A.kSkeleton && A.kBomb && A.kPlayer &&
-                  A.mGetTransform && A.mGetCompInChildren && A.mGetPosition && A.mW2S &&
-                  A.mCamMain && A.mGetBounds && A.mScreenW && A.mScreenH && A.mObjGetName &&
-                  A.mPcHealth && A.mPlayerTeam && A.mSkelWeapon && A.mBombTimeLeft;
+        // обязательные для бокса
+        need(A.kPlayerController, "PlayerController"); need(A.kSkeleton, "PlayerSkeleton");
+        need(kComponent, "Component"); need(kTransform, "Transform"); need(kCamera, "Camera");
+        need(kRenderer, "Renderer"); need(kScreen, "Screen");
+        need(A.mGetTransform, "get_transform"); need(A.mGetCompInChildren, "GetComponentInChildren/2");
+        need(A.mGetPosition, "get_position"); need(A.mW2S, "WorldToScreenPoint");
+        need(A.mGetBounds, "get_bounds"); need(A.mScreenW, "get_width"); need(A.mScreenH, "get_height");
+
+        A.ready = A.missing.empty();
         return A.ready;
     }
 
-    // Il2CppString: int32 length @0x10, UTF-16 chars @0x14 (стандартный layout IL2CPP, не из дампа).
     std::string Str(void* s)
     {
         uintptr_t p = (uintptr_t)s;
@@ -108,13 +116,17 @@ namespace
         return il::InvokeBoxed<V3>(A.mGetPosition, tr, nullptr);
     }
 
-    // ---- Кэш сущностей ----
     struct Ent
     {
         uintptr_t pc = 0, skeleton = 0, body = 0;
-        bool        dead = false;
         std::string name, team, weapon;
     };
+
+    struct Stats   // счётчики для строки статуса
+    {
+        int pc = 0, local = 0, noPlayer = 0, noSkel = 0, noBody = 0;
+        int boundsBad = 0, behind = 0, tiny = 0, drawn = 0, teamSkipped = 0, dead = 0;
+    } S;
 
     struct Frame
     {
@@ -131,14 +143,17 @@ namespace
     {
         F.ents.clear();
         F.camera = 0; F.haveLocal = false; F.localTeam.clear(); F.bomb = 0;
+        S.pc = S.local = S.noPlayer = S.noSkel = S.noBody = 0;
 
         for (uintptr_t pc : il::FindObjectsOfType(A.kPlayerController)) {
+            S.pc++;
             uintptr_t player = il::Read<uintptr_t>(pc + Cfg::PC_Player);
-            if (!il::ValidPtr(player)) continue;
+            if (!il::ValidPtr(player)) { S.noPlayer++; continue; }
 
             std::string team = Str(il::Invoke(A.mPlayerTeam, (void*)player, nullptr));
 
             if (il::Read<uint8_t>(player + Cfg::Player_IsLocal)) {
+                S.local++;
                 uintptr_t cam = il::Read<uintptr_t>(pc + Cfg::PC_MainCamera);
                 if (il::ValidPtr(cam)) F.camera = cam;
                 F.localPos  = WorldPos((void*)pc);
@@ -155,11 +170,12 @@ namespace
             bool inc = true;
             void* a[2] = { il::Type(A.kSkeleton), &inc };
             e.skeleton = (uintptr_t)il::Invoke(A.mGetCompInChildren, (void*)pc, a);
-            if (!il::ValidPtr(e.skeleton)) continue;
-            e.body = il::Read<uintptr_t>(e.skeleton + Cfg::Skel_Body);
-            if (!il::ValidPtr(e.body)) continue;
+            if (!il::ValidPtr(e.skeleton)) { S.noSkel++; continue; }
 
-            // Имя GameObject оружия. Что именно там лежит (id префаба или читаемое имя) — проверить в игре.
+            e.body = il::Read<uintptr_t>(e.skeleton + Cfg::Skel_Body);
+            if (!il::ValidPtr(e.body)) e.body = il::Read<uintptr_t>(e.skeleton + Cfg::Skel_BodyLod);
+            if (!il::ValidPtr(e.body)) { S.noBody++; continue; }
+
             void* wgo = il::Invoke(A.mSkelWeapon, (void*)e.skeleton, nullptr);
             if (il::ValidPtr((uintptr_t)wgo))
                 e.weapon = Str(il::Invoke(A.mObjGetName, wgo, nullptr));
@@ -168,7 +184,7 @@ namespace
         }
 
         if (!F.camera) {
-            void* c = il::Invoke(A.mCamMain, nullptr, nullptr);   // запасной вариант: Camera.main
+            void* c = il::Invoke(A.mCamMain, nullptr, nullptr);
             if (il::ValidPtr((uintptr_t)c)) F.camera = (uintptr_t)c;
         }
 
@@ -176,7 +192,6 @@ namespace
             if (il::Read<uint8_t>(b + Cfg::Bomb_IsActive)) { F.bomb = b; break; }
     }
 
-    // Возвращает экранные координаты в точках ImGui (начало слева-сверху). false, если точка за камерой.
     bool W2S(const V3& w, float sx, float sy, float screenH, ImVec2& out)
     {
         V3 p = w;
@@ -206,46 +221,64 @@ namespace
         dl->AddLine(b, ImVec2(b.x - lw, b.y), col);  dl->AddLine(b, ImVec2(b.x, b.y - lh), col);
     }
 
+    void StatusLine(ImDrawList* dl, bool ilReady, bool camOk)
+    {
+        if (!kStatus) return;
+        char t[256];
+        if (!ilReady)       std::snprintf(t, sizeof t, "ESP: IL2CPP not ready");
+        else if (!A.ready)  std::snprintf(t, sizeof t, "ESP: missing %s", A.missing.c_str());
+        else std::snprintf(t, sizeof t,
+            "ESP pc=%d loc=%d noPl=%d noSk=%d noBd=%d cam=%d | team=%d dead=%d bnd=%d beh=%d tiny=%d draw=%d",
+            S.pc, S.local, S.noPlayer, S.noSkel, S.noBody, camOk ? 1 : 0,
+            S.teamSkipped, S.dead, S.boundsBad, S.behind, S.tiny, S.drawn);
+        dl->AddText(ImVec2(11, 61), IM_COL32(0, 0, 0, 255), t);
+        dl->AddText(ImVec2(10, 60), IM_COL32(255, 255, 0, 255), t);
+    }
+
     float g_bombMax = 0.f;
 }
 
 void visuals::run()
 {
-    if (!il::Init()) return;                 // сам ждёт готовности UnityFramework
+    bool ilReady = il::Init();
     if (!esp_enabled) return;
-    if (!ResolveApi()) return;
+
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    if (!ilReady || !ResolveApi()) { StatusLine(dl, ilReady, false); return; }
 
     double now = ImGui::GetTime();
     if (F.lastRefresh < 0.0 || now - F.lastRefresh >= Cfg::RefreshInterval) {
         F.lastRefresh = now;
         Refresh();
     }
-    if (!il::ValidPtr(F.camera)) return;
+
+    bool camOk = il::ValidPtr(F.camera);
+    S.teamSkipped = S.dead = S.boundsBad = S.behind = S.tiny = S.drawn = 0;
 
     int sw = il::InvokeBoxed<int>(A.mScreenW, nullptr, nullptr);
     int sh = il::InvokeBoxed<int>(A.mScreenH, nullptr, nullptr);
-    if (sw <= 0 || sh <= 0) return;
+    if (!camOk || sw <= 0 || sh <= 0) { StatusLine(dl, true, camOk); return; }
 
     ImVec2 disp = ImGui::GetIO().DisplaySize;
     float sx = disp.x / (float)sw, sy = disp.y / (float)sh;
-    ImDrawList* dl = ImGui::GetBackgroundDrawList();
 
     for (const Ent& e : F.ents) {
-        if (F.haveLocal && !F.localTeam.empty() && e.team == F.localTeam) continue;  // свои
-        if (il::Read<uint8_t>(e.pc + Cfg::PC_IsDeath)) continue;
+        if (F.haveLocal && !F.localTeam.empty() && e.team == F.localTeam) { S.teamSkipped++; continue; }
+        if (il::Read<uint8_t>(e.pc + Cfg::PC_IsDeath)) { S.dead++; continue; }
 
         Bounds bb = il::InvokeBoxed<Bounds>(A.mGetBounds, (void*)e.body, nullptr);
-        if (!Finite(bb.center) || !Finite(bb.extents)) continue;
+        if (!Finite(bb.center) || !Finite(bb.extents)) { S.boundsBad++; continue; }
 
         V3 feet{ bb.center.x, bb.center.y - bb.extents.y, bb.center.z };
         V3 head{ bb.center.x, bb.center.y + bb.extents.y, bb.center.z };
         ImVec2 sf, sh2;
-        if (!W2S(feet, sx, sy, (float)sh, sf) || !W2S(head, sx, sy, (float)sh, sh2)) continue;
+        if (!W2S(feet, sx, sy, (float)sh, sf) || !W2S(head, sx, sy, (float)sh, sh2)) { S.behind++; continue; }
 
         float h = sf.y - sh2.y;
-        if (h < 4.f || h > disp.y * 3.f) continue;
+        if (h < 4.f || h > disp.y * 3.f) { S.tiny++; continue; }
         float w = h * Cfg::BoxWidthRatio;
         ImVec2 a(sf.x - w * 0.5f, sh2.y), b(sf.x + w * 0.5f, sf.y);
+        S.drawn++;
 
         if (boxFill) dl->AddRectFilled(a, b, Col(box_fill_color));
         if (box2D) {
@@ -255,7 +288,7 @@ void visuals::run()
             } else CornerBox(dl, a, b, Col(box_color));
         }
 
-        int hp = il::InvokeBoxed<int>(A.mPcHealth, (void*)e.pc, nullptr);
+        int hp = A.mPcHealth ? il::InvokeBoxed<int>(A.mPcHealth, (void*)e.pc, nullptr) : 0;
         if (healthBar || healthBarText) {
             float frac = std::clamp((float)hp / Cfg::MaxHealth, 0.f, 1.f);
             if (healthBar) {
@@ -269,7 +302,7 @@ void visuals::run()
         }
 
         float topY = a.y - ImGui::GetTextLineHeight() - 2.f;
-        if (names && !e.name.empty()) { Text(dl, ImVec2(sf.x, topY), Col(names_color), e.name.c_str(), true); }
+        if (names && !e.name.empty()) Text(dl, ImVec2(sf.x, topY), Col(names_color), e.name.c_str(), true);
 
         float botY = b.y + 2.f;
         if (weaponText && !e.weapon.empty()) {
@@ -281,14 +314,13 @@ void visuals::run()
             float d = std::sqrt((p.x - F.localPos.x) * (p.x - F.localPos.x) +
                                 (p.y - F.localPos.y) * (p.y - F.localPos.y) +
                                 (p.z - F.localPos.z) * (p.z - F.localPos.z));
-            char t[24]; std::snprintf(t, sizeof t, "%.0f u", d);   // единица "u": масштаб мира не подтверждён
+            char t[24]; std::snprintf(t, sizeof t, "%.0f u", d);
             Text(dl, ImVec2(sf.x, botY), Col(distance_color), t, true);
         }
         if (tracer) dl->AddLine(ImVec2(disp.x * 0.5f, disp.y), sf, Col(tracer_color));
     }
 
-    // Таймер бомбы. Полное время фьюза из дампа не читаю: максимум берётся по первому увиденному TimeLeft.
-    if (bomb_timer_bar && il::ValidPtr(F.bomb) && il::Read<uint8_t>(F.bomb + Cfg::Bomb_IsActive)) {
+    if (bomb_timer_bar && A.mBombTimeLeft && il::ValidPtr(F.bomb) && il::Read<uint8_t>(F.bomb + Cfg::Bomb_IsActive)) {
         float left = il::InvokeBoxed<float>(A.mBombTimeLeft, (void*)F.bomb, nullptr);
         if (std::isfinite(left) && left > 0.f) {
             g_bombMax = std::max(g_bombMax, left);
@@ -300,4 +332,6 @@ void visuals::run()
             Text(dl, ImVec2(disp.x * 0.5f, y0 + 8), Col(bomb_timer_color), t, true);
         }
     } else g_bombMax = 0.f;
+
+    StatusLine(dl, true, camOk);
 }
