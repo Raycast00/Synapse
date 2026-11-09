@@ -1,6 +1,7 @@
 namespace rage
 {
     void run();
+    void ApplyRecoilControl(bool enabled);
 
     // Weapon
     inline bool infinity_ammo = false;

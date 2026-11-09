@@ -3,7 +3,6 @@
 #include "il2cpp/il2cpp.h"
 #include <unordered_map>
 #include <vector>
-#include <chrono>
 
 using IL2CPP::Read;
 using IL2CPP::Write;
@@ -26,7 +25,7 @@ static uintptr_t fpsCamera()
 }
 
 namespace off {
-    // WeaponParameters
+    // WeaponParameters (Assembly-CSharp, dump.cs: class WeaponParameters)
     constexpr uintptr_t scopedMoveInacc = 0x58;
     constexpr uintptr_t edgeSpreadShots = 0x5C;
     constexpr uintptr_t airInaccuracy   = 0x68;
@@ -40,6 +39,21 @@ namespace off {
     constexpr uintptr_t vertRange  = 0x14;
     // PlayerFPSCamera
     constexpr uintptr_t camKick[] = { 0x3C, 0x4C, 0x50, 0x54, 0x58, 0x74 };
+    constexpr uintptr_t camPlayer = 0x118;   // PlayerFPSCamera._player (PlayerController)
+
+    // PlayerController
+    constexpr uintptr_t pcMovement = 0x40;   // PlayerController._movementController
+    constexpr uintptr_t pcArms     = 0x60;   // PlayerController._armsController
+
+    // ArmsController. Источник имён: dump.cs, точная роль _timeFired/_nextDryFire в геймплее не прослежена.
+    constexpr uintptr_t arms_MagazineCapacity = 0x1B8;  // short, текущий патрон в магазине
+    constexpr uintptr_t arms_Capacity         = 0x1BA;  // short, текущий резерв
+    constexpr uintptr_t arms_TimeFired        = 0x1BC;  // float
+    constexpr uintptr_t arms_NextDryFire      = 0x1C0;  // float
+
+    // PlayerMovement
+    constexpr uintptr_t pm_IsFreezing = 0x164;  // bool, читается в приватном get_Frozen()
+    constexpr uintptr_t pm_IsGrounded = 0x15C;  // bool, public _isGrounded
 }
 
 struct Orig {
@@ -78,9 +92,9 @@ static void applyWeapon(uintptr_t wp, bool spread, bool recoil)
     }
     const Orig& o = g_orig[wp];
 
-    Write<float>(wp + off::pelletSpread,   spread ? 0.f : o.pellet);
+    Write<float>(wp + off::pelletSpread,    spread ? 0.f : o.pellet);
     Write<float>(wp + off::scopedMoveInacc, spread ? 0.f : o.scoped);
-    Write<int>(wp + off::edgeSpreadShots,  spread ? 0   : o.edge);
+    Write<int>(wp + off::edgeSpreadShots,   spread ? 0   : o.edge);
     if (ok(air))
         for (int i = 0; i < off::airFloats; i++)
             Write<float>(air + off::airStart + i * 4, spread ? 0.f : o.air[i]);
@@ -93,41 +107,67 @@ static void applyWeapon(uintptr_t wp, bool spread, bool recoil)
 static void applyCameraRecoil()
 {
     uintptr_t cam = fpsCamera();
-
-    static bool logged = false;
-    if (!logged) {
-        logged = true;
-        NSLog(@"[rage] cam=%p kickBack=%f punchPitch=%f punchShotPitch=%f",
-              (void*)cam,
-              ok(cam) ? Read<float>(cam + 0x3C) : -1.f,
-              ok(cam) ? Read<float>(cam + 0x4C) : -1.f,
-              ok(cam) ? Read<float>(cam + 0x58) : -1.f);
-    }
-
     if (!ok(cam)) return;
     for (uintptr_t o : off::camKick)
         Write<float>(cam + o, 0.f);
 }
 
+// Экспортируется для aim::RCS, чтобы не дублировать логику отдачи.
+void rage::ApplyRecoilControl(bool enabled)
+{
+    refreshWeapons();
+    for (uintptr_t wp : g_weapons) applyWeapon(wp, false, enabled);
+    if (enabled) applyCameraRecoil();
+}
+
+static uintptr_t localPlayerController()
+{
+    uintptr_t cam = fpsCamera();
+    if (!ok(cam)) return 0;
+    return Read<uintptr_t>(cam + off::camPlayer);
+}
+
+static void applyInfinityAmmo()
+{
+    uintptr_t pc = localPlayerController();
+    if (!ok(pc)) return;
+    uintptr_t arms = Read<uintptr_t>(pc + off::pcArms);
+    if (!ok(arms)) return;
+    Write<int16_t>(arms + off::arms_MagazineCapacity, 999);
+    Write<int16_t>(arms + off::arms_Capacity, 999);
+}
+
+static void applyFireRate()
+{
+    uintptr_t pc = localPlayerController();
+    if (!ok(pc)) return;
+    uintptr_t arms = Read<uintptr_t>(pc + off::pcArms);
+    if (!ok(arms)) return;
+    Write<float>(arms + off::arms_TimeFired, -1e6f);
+    Write<float>(arms + off::arms_NextDryFire, -1e6f);
+}
+
+static void applyMBT()
+{
+    uintptr_t pc = localPlayerController();
+    if (!ok(pc)) return;
+    uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement);
+    if (!ok(mv)) return;
+    Write<uint8_t>(mv + off::pm_IsFreezing, 0);
+}
+
+static void applyAirJump()
+{
+    uintptr_t pc = localPlayerController();
+    if (!ok(pc)) return;
+    uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement);
+    if (!ok(mv)) return;
+    Write<uint8_t>(mv + off::pm_IsGrounded, 1);
+}
+
 void rage::run()
 {
     if (!IL2CPP::Init()) return;
-
-    if (rage::infinityAmmo)
-    {
-        
-    }
-
-    static bool once = false;
-    if (!once) {
-        once = true;
-        uintptr_t ak = catalogGet(9);   // AK47
-        NSLog(@"[rage] ak=%p", (void*)ak);
-        if (ok(ak))
-            NSLog(@"[rage] range=%f pellet=%f edge=%d",
-                  Read<float>(ak + 0x90), Read<float>(ak + off::pelletSpread),
-                  Read<int>(ak + off::edgeSpreadShots));
-    }
 
     static bool lastSpread = false, lastRecoil = false, pending = false;
     if (rage::no_spread != lastSpread || rage::no_recoil != lastRecoil) {
@@ -140,12 +180,15 @@ void rage::run()
         if (!g_weapons.empty()) {
             for (uintptr_t wp : g_weapons)
                 applyWeapon(wp, rage::no_spread, rage::no_recoil);
-            NSLog(@"[rage] applied to %d weapons (spread=%d recoil=%d)",
-                  (int)g_weapons.size(), (int)rage::no_spread, (int)rage::no_recoil);
             pending = false;
         }
     }
+    if (rage::no_recoil) applyCameraRecoil();
 
-    if (rage::no_recoil)
-        applyCameraRecoil();
+    if (rage::infinity_ammo) applyInfinityAmmo();
+    if (rage::fire_rate)     applyFireRate();
+    if (rage::MBT)           applyMBT();
+    if (rage::air_jump)      applyAirJump();
+
+    // rage::wallbang: не реализовано, нужен хук BulletPenetration.Opaque / ArmsController.CastPenetration.
 }
