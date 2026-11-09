@@ -48,7 +48,7 @@ namespace
         std::string missing;
         void *kPlayerController{}, *kPlayer{}, *kSkeleton{}, *kBomb{}, *kSMR{};
         void *mGetTransform{}, *mGetPosition{}, *mW2S{}, *mCamMain{};
-        void *mGetBounds{}, *mGetCompInChildren{}, *mObjGetName{}, *mGetBones{};
+        void *mGetBounds{}, *mGetCompInChildren{}, *mObjGetName{}, *mGetBones{}, *mGetHeadBone{};
         void *mScreenW{}, *mScreenH{};
         void *mPcHealth{}, *mPlayerTeam{}, *mPlayerIsAlive{}, *mSkelWeapon{}, *mBombTimeLeft{};
     } A;
