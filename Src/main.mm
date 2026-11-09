@@ -7,6 +7,7 @@
 #include "Features/Visuals/visuals.h"
 #include "Features/Aim/aim.h"
 #include "Features/Rage/rage.h"
+#include "Features/Misc/misc.h"
 #include "Settings/settings.h"
 
 #include "Memory/KittyInclude.hpp"
@@ -121,6 +122,7 @@ static bool   g_tLeave = false;
     //visuals::run();
     aim::run();
     rage::run();
+    //misc::run();
 
     // Кнопка вызова меню (всегда видна)
     ImGui::SetNextWindowPos(ImVec2(20, 60), ImGuiCond_FirstUseEver);
@@ -217,6 +219,12 @@ static bool   g_tLeave = false;
                 ImGui::Combo("Hitbox", &aim::current_aimbot_hitbox, aim::aimbot_hitboxes, IM_ARRAYSIZE(aim::aimbot_hitboxes));
                 
                 ImGui::Checkbox("RCS", &aim::RCS);
+
+                ImGui::SeparatorText("Anti Aim");
+                ImGui::Checkbox("Enabled", &aim::drawFOV);
+                ImGui::SliderFloat("Pitch", &aim::anti_pitch, -90.f, 180.f, "%.1f");
+                ImGui::SliderFloat("Yaw", &aim::anti_yaw, -90.f, 90.f, "%.1f");
+
                 ImGui::EndTabItem();
             }
 
@@ -225,6 +233,13 @@ static bool   g_tLeave = false;
                 ImGui::Checkbox("Infinity Ammo", &rage::infinityAmmo);
                 ImGui::Checkbox("No Recoil", &rage::noRecoil);
                 ImGui::Checkbox("No Spread", &rage::noSpread);
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("Misc"))
+            {
+                ImGui::Checkbox("Thirdperson", &misc::thirdperson);
+
                 ImGui::EndTabItem();
             }
 

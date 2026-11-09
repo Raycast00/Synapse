@@ -4,8 +4,12 @@ namespace aim
 
     inline bool aimbot = false;
     inline bool silent = false;
+    inline bool anti_aim = false;
 
     inline float aimbot_smoothness = 5.f;
+
+    inline float anti_pitch = 90.f;
+    inline float anti_yaw = 180.f;
 
     inline int current_aimbot_hitbox = 0;
     inline const char* aimbot_hitboxes[] = { "Head", "Chest", "Random" };
