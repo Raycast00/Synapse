@@ -21,7 +21,7 @@ void aim::run()
         }
     }
 
-    if (aim::drawFOV)
+    if (aim::draw_fov)
     {
         ImVec2 center(screenWidth / 2.0f, screenHeight / 2.0f);
         draw->AddCircle(center, aim::fov_radius, ImGui::ColorConvertFloat4ToU32({
