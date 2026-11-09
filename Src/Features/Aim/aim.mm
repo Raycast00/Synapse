@@ -31,12 +31,13 @@ void aim::run()
 
     if (aim::anti_aim)
     {
-        void* camClass = IL2CPP::Class("ScarletWork.Game", "PlayerFPSCamera");
-        void* localField = IL2CPP::Field(camClass, "<Local>k__BackingField");
-        uintptr_t camera = IL2CPP::StaticField<uintptr_t>(localField);
-        if (!camera) return;
+        static void* cmcClass = IL2CPP::Class("ScarletWork.Game.Camera", "CameraMovementController");
+        std::vector<uintptr_t> controllers = IL2CPP::FindObjectsOfType(cmcClass); 
 
-        IL2CPP::Write<float>(camera + 0x50, aim::anti_yaw); 
-        IL2CPP::Write<float>(camera + 0x4C, aim::anti_pitch); 
+        if (!controllers.empty())
+        {
+            uintptr_t cmc = controllers[0];
+            IL2CPP::Write<float>(cmc + 0x40, aim::anti_yaw * (M_PI / 180.0f));
+        }
     }
 }
