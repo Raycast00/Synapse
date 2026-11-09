@@ -245,9 +245,8 @@ static bool   g_tLeave = false;
                 ImGui::Checkbox("Move Before Timer", &rage::MBT);
                 ImGui::Checkbox("Wallbang", &rage::wallbang);
                 ImGui::Checkbox("Air Jump", &rage::air_jump);
-
-                ImGui::Checkbox("Fly", &rage::fly);
-                ImGui::SliderFloat("Fly Speed", &rage::fly_speed, 1.f, 20.f, "%.1f");
+                ImGui::Checkbox("Super Jump", &rage::super_jump);
+                ImGui::SliderFloat("Jump Strength", &rage::jump_strength, 1.f, 20.f, "%.1f");
 
                 ImGui::SeparatorText("Weapon");
 

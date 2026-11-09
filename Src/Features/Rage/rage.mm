@@ -185,24 +185,13 @@ static void applyAirJump()
     Write<uint8_t>(mv + off::pm_IsGrounded, 1);
 }
 
-static void applyFly()
+static void applySuperJump()
 {
     uintptr_t pc = localPlayerController();
     if (!ok(pc)) return;
-    
-    uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement); // PlayerMovement (0x40 в PlayerController)
+    uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement);
     if (!ok(mv)) return;
-
-    if (rage::fly) {
-        // Включаем Noclip
-        Write<uint8_t>(mv + off::pm_NoclipEnabled, 1);
-        
-        // Опционально: ускоряем полет (например, в 3 раза быстрее)
-        Write<float>(mv + off::pm_NoclipSpeed, rage::fly_speed); // По умолчанию там что-то вроде 10.0f
-    } else {
-        // Выключаем Noclip
-        Write<uint8_t>(mv + off::pm_NoclipEnabled, 0);
-    }
+    Write<float>(mv + 0x20, rage::jump_strength);
 }
 
 static void drawStatus(bool ilReady)
@@ -264,5 +253,5 @@ void rage::run()
     if (rage::fire_rate)     applyFireRate();
     if (rage::MBT)           applyMBT();
     if (rage::air_jump)      applyAirJump();
-    if (rage::fly) applyFly();
+    if (rage::super_jump)    applySuperJump();
 }

@@ -14,6 +14,6 @@ namespace rage
     inline bool MBT = false;
     inline bool air_jump = false;
 
-    inline bool fly = false;
-    inline float fly_speed = 20.f;
+    inline bool super_jump = false;
+    inline float jump_strength = 200.f;
 }
