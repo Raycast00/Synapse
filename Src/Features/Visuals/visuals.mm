@@ -168,83 +168,6 @@ namespace
         double    lastRefresh = -1.0;
     } F;
 
-    void CollectBones(Ent& e)
-    {
-        e.bones.clear();
-        if (!A.mGetBones) return;
-        uintptr_t arr = (uintptr_t)il::Invoke(A.mGetBones, (void*)e.body, nullptr);
-        if (!il::ValidPtr(arr)) return;
-        uint64_t len = il::Read<uint64_t>(arr + 0x18);           // Il2CppArray: max_length @0x18, data @0x20
-        if (len == 0 || len > 512) return;
-
-        std::vector<uintptr_t> all;
-        for (uint64_t i = 0; i < len; i++) {
-            uintptr_t t = il::Read<uintptr_t>(arr + 0x20 + i * 8);
-            if (il::ValidPtr(t)) all.push_back(t);
-        }
-        if (all.size() < 4) return;
-
-        size_t stride = (all.size() + Cfg::MaxBones - 1) / Cfg::MaxBones;
-        for (size_t i = 0; i < all.size(); i += stride) e.bones.push_back(all[i]);
-    }
-
-    void Refresh()
-    {
-        F.ents.clear();
-        F.camera = 0; F.haveLocal = false; F.localTeam.clear(); F.bomb = 0;
-        S.pc = S.local = S.noPlayer = S.noSkel = S.noBody = S.withBones = 0;
-
-        for (uintptr_t pc : il::FindObjectsOfType(A.kPlayerController)) {
-            S.pc++;
-            uintptr_t player = il::Read<uintptr_t>(pc + Cfg::PC_Player);
-            if (!il::ValidPtr(player)) { S.noPlayer++; continue; }
-
-            std::string team = Str(il::Invoke(A.mPlayerTeam, (void*)player, nullptr));
-
-            if (il::Read<uint8_t>(player + Cfg::Player_IsLocal)) {
-                S.local++;
-                uintptr_t cam = il::Read<uintptr_t>(pc + Cfg::PC_MainCamera);
-                if (il::ValidPtr(cam)) F.camera = cam;
-                F.localPos  = WorldPos((void*)pc);
-                F.localTeam = team;
-                F.haveLocal = true;
-                continue;
-            }
-
-            Ent e;
-            e.pc     = pc;
-            e.player = player;
-            e.team   = team;
-            e.name   = Str((void*)il::Read<uintptr_t>(player + Cfg::Player_Nick));
-
-            bool inc = true;
-            void* a[2] = { il::Type(A.kSkeleton), &inc };
-            e.skeleton = (uintptr_t)il::Invoke(A.mGetCompInChildren, (void*)pc, a);
-            if (!il::ValidPtr(e.skeleton)) { S.noSkel++; continue; }
-
-            e.body = il::Read<uintptr_t>(e.skeleton + Cfg::Skel_Body);
-            if (!il::ValidPtr(e.body)) e.body = il::Read<uintptr_t>(e.skeleton + Cfg::Skel_BodyLod);
-            if (!il::ValidPtr(e.body)) { S.noBody++; continue; }
-
-            CollectBones(e);
-            if (!e.bones.empty()) S.withBones++;
-
-            void* wgo = il::Invoke(A.mSkelWeapon, (void*)e.skeleton, nullptr);
-            if (il::ValidPtr((uintptr_t)wgo))
-                e.weapon = Str(il::Invoke(A.mObjGetName, wgo, nullptr));
-
-            F.ents.push_back(std::move(e));
-        }
-
-        if (!F.camera) {
-            void* c = il::Invoke(A.mCamMain, nullptr, nullptr);
-            if (il::ValidPtr((uintptr_t)c)) F.camera = (uintptr_t)c;
-        }
-
-        for (uintptr_t b : il::FindObjectsOfType(A.kBomb))
-            if (il::Read<uint8_t>(b + Cfg::Bomb_IsActive)) { F.bomb = b; break; }
-    }
-
     float Median(std::vector<float>& v)
     {
         std::nth_element(v.begin(), v.begin() + v.size() / 2, v.end());
@@ -321,6 +244,63 @@ namespace
                 e.bones.push_back(hb);
         }
         e.reach = maxD * Cfg::ReachK;
+    }
+
+    void Refresh()
+    {
+        F.ents.clear();
+        F.camera = 0; F.haveLocal = false; F.localTeam.clear(); F.bomb = 0;
+        S.pc = S.local = S.noPlayer = S.noSkel = S.noBody = S.withBones = 0;
+
+        for (uintptr_t pc : il::FindObjectsOfType(A.kPlayerController)) {
+            S.pc++;
+            uintptr_t player = il::Read<uintptr_t>(pc + Cfg::PC_Player);
+            if (!il::ValidPtr(player)) { S.noPlayer++; continue; }
+
+            std::string team = Str(il::Invoke(A.mPlayerTeam, (void*)player, nullptr));
+
+            if (il::Read<uint8_t>(player + Cfg::Player_IsLocal)) {
+                S.local++;
+                uintptr_t cam = il::Read<uintptr_t>(pc + Cfg::PC_MainCamera);
+                if (il::ValidPtr(cam)) F.camera = cam;
+                F.localPos  = WorldPos((void*)pc);
+                F.localTeam = team;
+                F.haveLocal = true;
+                continue;
+            }
+
+            Ent e;
+            e.pc     = pc;
+            e.player = player;
+            e.team   = team;
+            e.name   = Str((void*)il::Read<uintptr_t>(player + Cfg::Player_Nick));
+
+            bool inc = true;
+            void* a[2] = { il::Type(A.kSkeleton), &inc };
+            e.skeleton = (uintptr_t)il::Invoke(A.mGetCompInChildren, (void*)pc, a);
+            if (!il::ValidPtr(e.skeleton)) { S.noSkel++; continue; }
+
+            e.body = il::Read<uintptr_t>(e.skeleton + Cfg::Skel_Body);
+            if (!il::ValidPtr(e.body)) e.body = il::Read<uintptr_t>(e.skeleton + Cfg::Skel_BodyLod);
+            if (!il::ValidPtr(e.body)) { S.noBody++; continue; }
+
+            CollectBones(e);
+            if (!e.bones.empty()) S.withBones++;
+
+            void* wgo = il::Invoke(A.mSkelWeapon, (void*)e.skeleton, nullptr);
+            if (il::ValidPtr((uintptr_t)wgo))
+                e.weapon = Str(il::Invoke(A.mObjGetName, wgo, nullptr));
+
+            F.ents.push_back(std::move(e));
+        }
+
+        if (!F.camera) {
+            void* c = il::Invoke(A.mCamMain, nullptr, nullptr);
+            if (il::ValidPtr((uintptr_t)c)) F.camera = (uintptr_t)c;
+        }
+
+        for (uintptr_t b : il::FindObjectsOfType(A.kBomb))
+            if (il::Read<uint8_t>(b + Cfg::Bomb_IsActive)) { F.bomb = b; break; }
     }
 
     // Мировой AABB по костям. false, если костей мало.
