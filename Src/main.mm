@@ -199,6 +199,12 @@ static bool   g_tLeave = false;
                 ImGui::SeparatorText("Bomb");
 
                 ImGui::Checkbox("Timer", &visuals::bomb_timer_bar);
+
+                // GRENADE
+                ImGui::SeparatorText("Grenade");
+                ImGui::Checkbox("Visualize Trajectory", &visuals::visualize_trajectory);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## Trajectory Color", visuals::grenade_trajectory_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
             }
 
             if (ImGui::BeginTabItem("Aim"))
@@ -208,17 +214,18 @@ static bool   g_tLeave = false;
                 {
                     ImGui::SameLine();
                     ImGui::Checkbox("Silent", &aim::silent);
-
-                    ImGui::SliderFloat("Smoothness", &aim::aimbot_smoothness, 0.f, 5.f, "%.0f");
                 }
+                ImGui::Checkbox("Automatic Fire", &aim::automatic_fire);
+                ImGui::Checkbox("Aim Through Walls", &aim::aim_through_walls);
 
-                ImGui::Checkbox("Draw FOV", &aim::drawFOV);
+                ImGui::Checkbox("Draw FOV", &aim::draw_fov);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## FOV Color", aim::fov_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-                ImGui::SliderFloat("FOV Radius", &aim::fov_radius, 60.f, 180.f, "%.0f");
+                ImGui::SliderFloat("Field of View", &aim::fov_radius, 60.f, 180.f, "%.0f");
 
-                ImGui::Checkbox("FOV Check", &aim::fovCheck);
-                ImGui::Combo("Hitbox", &aim::current_aimbot_hitbox, aim::aimbot_hitboxes, IM_ARRAYSIZE(aim::aimbot_hitboxes));
+                ImGui::SliderFloat("Smoothing", &aim::aimbot_smoothing, 0.f, 100.f, "%.0f%%");
+
+                ImGui::Combo("Hitboxes", &aim::current_aimbot_hitbox, aim::aimbot_hitboxes, IM_ARRAYSIZE(aim::aimbot_hitboxes));
                 
                 ImGui::Checkbox("RCS", &aim::RCS);
 

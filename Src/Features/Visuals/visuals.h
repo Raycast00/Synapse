@@ -19,7 +19,7 @@ namespace visuals
     inline bool healthBarText = false;
 
     inline bool names = false;
-    inline float names_color[4]{ 1.f, 1.f, 1.f, 1.f };
+    inline float names_color[4]{ 1.f, 1.f, 1.f, 0.75f };
 
     inline bool weaponText = false;
     inline float weapon_text_color[4]{ 1.f, 1.f, 1.f, 1.f };
@@ -35,4 +35,8 @@ namespace visuals
     // Bomb
     inline bool bomb_timer_bar = false;
     inline float bomb_timer_color[4]{ 1.f, 1.f, 1.f, 1.f };
+
+    // Grenade
+    inline bool visualize_trajectory = false;
+    inline float grenade_trajectory_color[4]{ 1.f, 1.f, 1.f, 0.75f };
 }
