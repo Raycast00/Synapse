@@ -148,6 +148,7 @@ static void applyInfinityAmmo()
     if (!ok(pc)) return;
     uintptr_t arms = Read<uintptr_t>(pc + off::pcArms);
     if (!ok(arms)) return;
+    
     Write<int16_t>(arms + off::arms_MagazineCapacity, 999);
     Write<int16_t>(arms + off::arms_Capacity, 999);
 }
@@ -158,8 +159,9 @@ static void applyFireRate()
     if (!ok(pc)) return;
     uintptr_t arms = Read<uintptr_t>(pc + off::pcArms);
     if (!ok(arms)) return;
-    Write<float>(arms + off::arms_TimeFired, -1e6f);
-    Write<float>(arms + off::arms_NextDryFire, -1e6f);
+
+    Write<float>(arms + off::arms_TimeFired, 10.0f);
+    Write<float>(arms + off::arms_NextDryFire, 10.0f);
 }
 
 static void applyMBT()
