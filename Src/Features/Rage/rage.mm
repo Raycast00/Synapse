@@ -109,19 +109,6 @@ static void applyWeapon(uintptr_t wp, bool spread, bool recoil)
     }
 }
 
-static void applyRapidFire()
-{
-    uintptr_t pc = localPlayerController();
-    if (!ok(pc)) return;
-    uintptr_t arms = Read<uintptr_t>(pc + off::pcArms);
-    if (!ok(arms)) return;
-
-    if (rage::rapid_fire) {
-        Write<float>(arms + off::arms_TimeFired, 10.0f);
-        Write<float>(arms + off::arms_NextDryFire, 0.0f);
-    }
-}
-
 static void applyCameraRecoil()
 {
     uintptr_t cam = fpsCamera();
@@ -169,19 +156,16 @@ static void applyInfinityAmmo()
     Write<int16_t>(arms + off::arms_Capacity, 999);
 }
 
-static void applyFireRate()
+static void applyRapidFire()
 {
     uintptr_t pc = localPlayerController();
     if (!ok(pc)) return;
     uintptr_t arms = Read<uintptr_t>(pc + off::pcArms);
     if (!ok(arms)) return;
 
-    if (rage::rapid_fire)
-    {
-        float value = 1.0f / (rage::rapid_fire_speed + 0.001f);
-        Write<float>(arms + off::arms_TimeFired, value);
-        
-        Write<float>(arms + off::arms_NextDryFire, 0.0f); 
+    if (rage::rapid_fire) {
+        Write<float>(arms + off::arms_TimeFired, 10.0f);
+        Write<float>(arms + off::arms_NextDryFire, 0.0f);
     }
 }
 
