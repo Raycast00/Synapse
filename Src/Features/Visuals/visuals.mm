@@ -31,12 +31,12 @@ namespace
         constexpr uintptr_t Bomb_IsActive   = 0x18;  // Bomb._isActive
 
         constexpr double RefreshInterval = 0.20;
-        constexpr float  MaxHealth       = 100.f;    // не проверено по дампу
+        constexpr float  MaxHealth       = 100.f;
 
         constexpr size_t MaxSourceBones = 512;
         constexpr size_t PickLow = 3, PickHigh = 3, PickSide = 6, PickStride = 8;
         constexpr float  PadTop    = 0.08f;
-        constexpr float  PadBottom = 0.04f;
+        constexpr float  PadBottom = 0.10f;
         constexpr float  PadSide   = 0.05f;
         constexpr float  OutlierK  = 3.5f;   // при выборе: кость дальше K * медианной дистанции отбрасывается
         constexpr float  ReachK    = 1.6f;
