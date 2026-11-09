@@ -33,12 +33,13 @@ namespace
         constexpr double RefreshInterval = 0.20;
         constexpr float  MaxHealth       = 100.f;    // не проверено по дампу
 
-        // Не откалибровано, подбирать в игре. Паддинги как доля высоты бокса по костям.
-        constexpr size_t MaxBones   = 32;
-        constexpr float  PadTop     = 0.10f;
-        constexpr float  PadBottom  = 0.03f;
-        constexpr float  PadSide    = 0.06f;
-        constexpr float  OutlierK   = 3.5f;          // кость дальше K * медианной дистанции от центра отбрасывается
+        constexpr size_t MaxSourceBones = 512;
+        constexpr size_t PickLow = 3, PickHigh = 3, PickSide = 6, PickStride = 8;
+        constexpr float  PadTop    = 0.08f;
+        constexpr float  PadBottom = 0.04f;
+        constexpr float  PadSide   = 0.05f;
+        constexpr float  OutlierK  = 3.5f;   // при выборе: кость дальше K * медианной дистанции отбрасывается
+        constexpr float  ReachK    = 1.6f;
     }
 
     struct Api
@@ -86,6 +87,7 @@ namespace
         A.mPlayerTeam        = il::Method(A.kPlayer, "get_Team", 0);
         A.mPlayerIsAlive     = il::Method(A.kPlayer, "get_IsAlive", 0);
         A.mSkelWeapon        = il::Method(A.kSkeleton, "get_Weapon", 0);
+        A.mGetHeadBone       = il::Method(A.kSkeleton, "GetHeadBone", 0);   // опционально
         A.mBombTimeLeft      = il::Method(A.kBomb, "get_TimeLeft", 0);
 
         need(A.kPlayerController, "PlayerController"); need(A.kSkeleton, "PlayerSkeleton");
@@ -145,6 +147,7 @@ namespace
     {
         uintptr_t pc = 0, player = 0, skeleton = 0, body = 0;
         std::vector<uintptr_t> bones;   // Transform* костей скина (до MaxBones)
+        float reach = 0.f;
         std::string name, team, weapon;
     };
 
@@ -248,7 +251,80 @@ namespace
         return v[v.size() / 2];
     }
 
+    V3 MedianPoint(const std::vector<V3>& pts)
+    {
+        std::vector<float> xs, ys, zs;
+        for (const V3& p : pts) { xs.push_back(p.x); ys.push_back(p.y); zs.push_back(p.z); }
+        return { Median(xs), Median(ys), Median(zs) };
+    }
+
+    float Dist(const V3& a, const V3& b)
+    {
+        return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z));
+    }
+
+    void CollectBones(Ent& e)
+    {
+        e.bones.clear();
+        e.reach = 0.f;
+        if (!A.mGetBones) return;
+        uintptr_t arr = (uintptr_t)il::Invoke(A.mGetBones, (void*)e.body, nullptr);
+        if (!il::ValidPtr(arr)) return;
+        uint64_t len = il::Read<uint64_t>(arr + 0x18);           // Il2CppArray: max_length @0x18, data @0x20
+        if (len < 6 || len > Cfg::MaxSourceBones) return;
+
+        std::vector<uintptr_t> tr;
+        std::vector<V3> pos;
+        for (uint64_t i = 0; i < len; i++) {
+            uintptr_t t = il::Read<uintptr_t>(arr + 0x20 + i * 8);
+            if (!il::ValidPtr(t)) continue;
+            V3 p = il::InvokeBoxed<V3>(A.mGetPosition, (void*)t, nullptr);
+            if (!Finite(p)) continue;
+            tr.push_back(t); pos.push_back(p);
+        }
+        if (pos.size() < 6) return;
+
+        V3 c = MedianPoint(pos);
+        std::vector<float> d;
+        for (const V3& p : pos) d.push_back(Dist(p, c));
+        std::vector<float> dm = d;
+        float lim = std::max(Median(dm) * Cfg::OutlierK, 1e-3f);
+
+        std::vector<size_t> keep;
+        for (size_t i = 0; i < pos.size(); i++) if (d[i] <= lim) keep.push_back(i);
+        if (keep.size() < 6) return;
+
+        std::vector<size_t> pick;
+        auto addBest = [&](auto less, size_t n) {
+            std::vector<size_t> idx = keep;
+            size_t k = std::min(n, idx.size());
+            std::partial_sort(idx.begin(), idx.begin() + k, idx.end(), less);
+            pick.insert(pick.end(), idx.begin(), idx.begin() + k);
+        };
+        auto hd = [&](size_t i) { float dx = pos[i].x - c.x, dz = pos[i].z - c.z; return dx * dx + dz * dz; };
+
+        addBest([&](size_t a, size_t b) { return pos[a].y < pos[b].y; }, Cfg::PickLow);    // ступни
+        addBest([&](size_t a, size_t b) { return pos[a].y > pos[b].y; }, Cfg::PickHigh);   // голова
+        addBest([&](size_t a, size_t b) { return hd(a) > hd(b); }, Cfg::PickSide);         // руки, разброс по бокам
+        for (size_t i = 0; i < keep.size(); i += Cfg::PickStride) pick.push_back(keep[i]);
+
+        std::sort(pick.begin(), pick.end());
+        pick.erase(std::unique(pick.begin(), pick.end()), pick.end());
+
+        float maxD = 0.f;
+        for (size_t i : pick) { e.bones.push_back(tr[i]); maxD = std::max(maxD, d[i]); }
+
+        // Кость головы гарантированно в наборе.
+        if (A.mGetHeadBone) {
+            uintptr_t hb = (uintptr_t)il::Invoke(A.mGetHeadBone, (void*)e.skeleton, nullptr);
+            if (il::ValidPtr(hb) && std::find(e.bones.begin(), e.bones.end(), hb) == e.bones.end())
+                e.bones.push_back(hb);
+        }
+        e.reach = maxD * Cfg::ReachK;
+    }
+
     // Мировой AABB по костям. false, если костей мало.
+        // Мировой AABB по отслеживаемым костям. false, если костей мало.
     bool BoneAABB(const Ent& e, V3& mn, V3& mx)
     {
         std::vector<V3> pts;
@@ -259,20 +335,10 @@ namespace
         }
         if (pts.size() < 4) return false;
 
-        std::vector<float> xs, ys, zs;
-        for (const V3& p : pts) { xs.push_back(p.x); ys.push_back(p.y); zs.push_back(p.z); }
-        V3 c{ Median(xs), Median(ys), Median(zs) };
-
-        std::vector<float> d;
-        for (const V3& p : pts)
-            d.push_back(std::sqrt((p.x - c.x) * (p.x - c.x) + (p.y - c.y) * (p.y - c.y) + (p.z - c.z) * (p.z - c.z)));
-        std::vector<float> dm = d;
-        float lim = std::max(Median(dm) * Cfg::OutlierK, 1e-3f);
-
+        V3 c = MedianPoint(pts);
         bool any = false;
-        for (size_t i = 0; i < pts.size(); i++) {
-            if (d[i] > lim) continue;
-            const V3& p = pts[i];
+        for (const V3& p : pts) {
+            if (e.reach > 0.f && Dist(p, c) > e.reach) continue;
             if (!any) { mn = mx = p; any = true; continue; }
             mn.x = std::min(mn.x, p.x); mn.y = std::min(mn.y, p.y); mn.z = std::min(mn.z, p.z);
             mx.x = std::max(mx.x, p.x); mx.y = std::max(mx.y, p.y); mx.z = std::max(mx.z, p.z);
