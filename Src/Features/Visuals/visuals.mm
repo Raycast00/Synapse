@@ -17,32 +17,39 @@ namespace
 
     constexpr bool kStatus = true;   // строка диагностики на экране; false = выключить
 
-    // Источник: dump.cs, присланный пользователем (Assembly-CSharp, PhotonRealtime).
+    // Источник оффсетов: dump.cs, присланный пользователем (Assembly-CSharp, PhotonRealtime).
     namespace Cfg
     {
-        constexpr uintptr_t PC_MainCamera  = 0x30;  // PlayerController._mainCamera
-        constexpr uintptr_t PC_Player      = 0x90;  // PlayerController._player
-        constexpr uintptr_t PC_IsDeath     = 0xA8;  // PlayerController._isDeath
-        constexpr uintptr_t Player_IsLocal = 0x1C;  // Photon.Realtime.Player.IsLocal
-        constexpr uintptr_t Player_Nick    = 0x20;  // Photon.Realtime.Player.nickName
-        constexpr uintptr_t Skel_Body      = 0x60;  // PlayerSkeleton._body
-        constexpr uintptr_t Skel_BodyLod   = 0x68;  // PlayerSkeleton._bodyLod
-        constexpr uintptr_t Bomb_IsActive  = 0x18;  // Bomb._isActive
+        constexpr uintptr_t PC_IsRagdolling = 0x49;  // PlayerController.IsRagdolling
+        constexpr uintptr_t PC_MainCamera   = 0x30;  // PlayerController._mainCamera
+        constexpr uintptr_t PC_Player       = 0x90;  // PlayerController._player
+        constexpr uintptr_t PC_IsDeath      = 0xA8;  // PlayerController._isDeath
+        constexpr uintptr_t Player_IsLocal  = 0x1C;  // Photon.Realtime.Player.IsLocal
+        constexpr uintptr_t Player_Nick     = 0x20;  // Photon.Realtime.Player.nickName
+        constexpr uintptr_t Skel_Body       = 0x60;  // PlayerSkeleton._body
+        constexpr uintptr_t Skel_BodyLod    = 0x68;  // PlayerSkeleton._bodyLod
+        constexpr uintptr_t Bomb_IsActive   = 0x18;  // Bomb._isActive
 
         constexpr double RefreshInterval = 0.20;
-        constexpr float  BoxWidthRatio   = 0.50f;
-        constexpr float  MaxHealth       = 100.f;   // не проверено по дампу
+        constexpr float  MaxHealth       = 100.f;    // не проверено по дампу
+
+        // Не откалибровано, подбирать в игре. Паддинги как доля высоты бокса по костям.
+        constexpr size_t MaxBones   = 32;
+        constexpr float  PadTop     = 0.10f;
+        constexpr float  PadBottom  = 0.03f;
+        constexpr float  PadSide    = 0.06f;
+        constexpr float  OutlierK   = 3.5f;          // кость дальше K * медианной дистанции от центра отбрасывается
     }
 
     struct Api
     {
         bool ready = false;
         std::string missing;
-        void *kPlayerController{}, *kPlayer{}, *kSkeleton{}, *kBomb{};
+        void *kPlayerController{}, *kPlayer{}, *kSkeleton{}, *kBomb{}, *kSMR{};
         void *mGetTransform{}, *mGetPosition{}, *mW2S{}, *mCamMain{};
-        void *mGetBounds{}, *mGetCompInChildren{}, *mObjGetName{};
+        void *mGetBounds{}, *mGetCompInChildren{}, *mObjGetName{}, *mGetBones{};
         void *mScreenW{}, *mScreenH{};
-        void *mPcHealth{}, *mPlayerTeam{}, *mSkelWeapon{}, *mBombTimeLeft{};
+        void *mPcHealth{}, *mPlayerTeam{}, *mPlayerIsAlive{}, *mSkelWeapon{}, *mBombTimeLeft{};
     } A;
 
     bool ResolveApi()
@@ -53,7 +60,7 @@ namespace
         auto need = [&](void* p, const char* n) { if (!p) { A.missing += n; A.missing += ' '; } };
 
         A.kPlayerController = il::Class("", "PlayerController", "Assembly-CSharp");
-        A.kSkeleton =         il::Class("ScarletWork.Game", "PlayerSkeleton", "Assembly-CSharp");
+        A.kSkeleton         = il::Class("ScarletWork.Game", "PlayerSkeleton", "Assembly-CSharp");
         A.kBomb             = il::Class("ScarletWork.Game", "Bomb", "Assembly-CSharp");
         A.kPlayer           = il::Class("Photon.Realtime", "Player", "PhotonRealtime");
 
@@ -63,6 +70,7 @@ namespace
         void* kRenderer  = il::Class("UnityEngine", "Renderer", core);
         void* kScreen    = il::Class("UnityEngine", "Screen", core);
         void* kObject    = il::Class("UnityEngine", "Object", core);
+        A.kSMR           = il::Class("UnityEngine", "SkinnedMeshRenderer", core);
 
         A.mGetTransform      = il::Method(kComponent, "get_transform", 0);
         A.mGetCompInChildren = il::Method(kComponent, "GetComponentInChildren", 2);
@@ -70,15 +78,16 @@ namespace
         A.mW2S               = il::Method(kCamera, "WorldToScreenPoint", 1);
         A.mCamMain           = il::Method(kCamera, "get_main", 0);
         A.mGetBounds         = il::Method(kRenderer, "get_bounds", 0);
+        A.mGetBones          = il::Method(A.kSMR, "get_bones", 0);          // опционально: без него откат на bounds
         A.mScreenW           = il::Method(kScreen, "get_width", 0);
         A.mScreenH           = il::Method(kScreen, "get_height", 0);
         A.mObjGetName        = il::Method(kObject, "get_name", 0);
         A.mPcHealth          = il::Method(A.kPlayerController, "get_Health", 0);
         A.mPlayerTeam        = il::Method(A.kPlayer, "get_Team", 0);
+        A.mPlayerIsAlive     = il::Method(A.kPlayer, "get_IsAlive", 0);
         A.mSkelWeapon        = il::Method(A.kSkeleton, "get_Weapon", 0);
         A.mBombTimeLeft      = il::Method(A.kBomb, "get_TimeLeft", 0);
 
-        // обязательные для бокса
         need(A.kPlayerController, "PlayerController"); need(A.kSkeleton, "PlayerSkeleton");
         need(kComponent, "Component"); need(kTransform, "Transform"); need(kCamera, "Camera");
         need(kRenderer, "Renderer"); need(kScreen, "Screen");
@@ -109,6 +118,22 @@ namespace
     bool Finite(const V3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z) &&
                                       std::fabs(v.x) < 1e6f && std::fabs(v.y) < 1e6f && std::fabs(v.z) < 1e6f; }
 
+    // Вызов геттера с boxed-результатом. false, если вызов не удался (исключение или нет метода).
+    bool CallInt(void* m, void* inst, int& out)
+    {
+        void* r = il::Invoke(m, inst, nullptr);
+        if (!il::ValidPtr((uintptr_t)r)) return false;
+        out = *(int*)((uint8_t*)r + 0x10);
+        return true;
+    }
+    bool CallBool(void* m, void* inst, bool& out)
+    {
+        void* r = il::Invoke(m, inst, nullptr);
+        if (!il::ValidPtr((uintptr_t)r)) return false;
+        out = *((uint8_t*)r + 0x10) != 0;
+        return true;
+    }
+
     V3 WorldPos(void* component)
     {
         void* tr = il::Invoke(A.mGetTransform, component, nullptr);
@@ -118,14 +143,15 @@ namespace
 
     struct Ent
     {
-        uintptr_t pc = 0, skeleton = 0, body = 0;
+        uintptr_t pc = 0, player = 0, skeleton = 0, body = 0;
+        std::vector<uintptr_t> bones;   // Transform* костей скина (до MaxBones)
         std::string name, team, weapon;
     };
 
-    struct Stats   // счётчики для строки статуса
+    struct Stats
     {
-        int pc = 0, local = 0, noPlayer = 0, noSkel = 0, noBody = 0;
-        int boundsBad = 0, behind = 0, tiny = 0, drawn = 0, teamSkipped = 0, dead = 0;
+        int pc = 0, local = 0, noPlayer = 0, noSkel = 0, noBody = 0, withBones = 0;
+        int boundsBad = 0, behind = 0, tiny = 0, drawn = 0, teamSkipped = 0, dead = 0, fallback = 0;
     } S;
 
     struct Frame
@@ -139,11 +165,31 @@ namespace
         double    lastRefresh = -1.0;
     } F;
 
+    void CollectBones(Ent& e)
+    {
+        e.bones.clear();
+        if (!A.mGetBones) return;
+        uintptr_t arr = (uintptr_t)il::Invoke(A.mGetBones, (void*)e.body, nullptr);
+        if (!il::ValidPtr(arr)) return;
+        uint64_t len = il::Read<uint64_t>(arr + 0x18);           // Il2CppArray: max_length @0x18, data @0x20
+        if (len == 0 || len > 512) return;
+
+        std::vector<uintptr_t> all;
+        for (uint64_t i = 0; i < len; i++) {
+            uintptr_t t = il::Read<uintptr_t>(arr + 0x20 + i * 8);
+            if (il::ValidPtr(t)) all.push_back(t);
+        }
+        if (all.size() < 4) return;
+
+        size_t stride = (all.size() + Cfg::MaxBones - 1) / Cfg::MaxBones;
+        for (size_t i = 0; i < all.size(); i += stride) e.bones.push_back(all[i]);
+    }
+
     void Refresh()
     {
         F.ents.clear();
         F.camera = 0; F.haveLocal = false; F.localTeam.clear(); F.bomb = 0;
-        S.pc = S.local = S.noPlayer = S.noSkel = S.noBody = 0;
+        S.pc = S.local = S.noPlayer = S.noSkel = S.noBody = S.withBones = 0;
 
         for (uintptr_t pc : il::FindObjectsOfType(A.kPlayerController)) {
             S.pc++;
@@ -163,9 +209,10 @@ namespace
             }
 
             Ent e;
-            e.pc   = pc;
-            e.team = team;
-            e.name = Str((void*)il::Read<uintptr_t>(player + Cfg::Player_Nick));
+            e.pc     = pc;
+            e.player = player;
+            e.team   = team;
+            e.name   = Str((void*)il::Read<uintptr_t>(player + Cfg::Player_Nick));
 
             bool inc = true;
             void* a[2] = { il::Type(A.kSkeleton), &inc };
@@ -175,6 +222,9 @@ namespace
             e.body = il::Read<uintptr_t>(e.skeleton + Cfg::Skel_Body);
             if (!il::ValidPtr(e.body)) e.body = il::Read<uintptr_t>(e.skeleton + Cfg::Skel_BodyLod);
             if (!il::ValidPtr(e.body)) { S.noBody++; continue; }
+
+            CollectBones(e);
+            if (!e.bones.empty()) S.withBones++;
 
             void* wgo = il::Invoke(A.mSkelWeapon, (void*)e.skeleton, nullptr);
             if (il::ValidPtr((uintptr_t)wgo))
@@ -190,6 +240,51 @@ namespace
 
         for (uintptr_t b : il::FindObjectsOfType(A.kBomb))
             if (il::Read<uint8_t>(b + Cfg::Bomb_IsActive)) { F.bomb = b; break; }
+    }
+
+    float Median(std::vector<float>& v)
+    {
+        std::nth_element(v.begin(), v.begin() + v.size() / 2, v.end());
+        return v[v.size() / 2];
+    }
+
+    // Мировой AABB по костям. false, если костей мало.
+    bool BoneAABB(const Ent& e, V3& mn, V3& mx)
+    {
+        std::vector<V3> pts;
+        pts.reserve(e.bones.size());
+        for (uintptr_t b : e.bones) {
+            V3 p = il::InvokeBoxed<V3>(A.mGetPosition, (void*)b, nullptr);
+            if (Finite(p)) pts.push_back(p);
+        }
+        if (pts.size() < 4) return false;
+
+        std::vector<float> xs, ys, zs;
+        for (const V3& p : pts) { xs.push_back(p.x); ys.push_back(p.y); zs.push_back(p.z); }
+        V3 c{ Median(xs), Median(ys), Median(zs) };
+
+        std::vector<float> d;
+        for (const V3& p : pts)
+            d.push_back(std::sqrt((p.x - c.x) * (p.x - c.x) + (p.y - c.y) * (p.y - c.y) + (p.z - c.z) * (p.z - c.z)));
+        std::vector<float> dm = d;
+        float lim = std::max(Median(dm) * Cfg::OutlierK, 1e-3f);
+
+        bool any = false;
+        for (size_t i = 0; i < pts.size(); i++) {
+            if (d[i] > lim) continue;
+            const V3& p = pts[i];
+            if (!any) { mn = mx = p; any = true; continue; }
+            mn.x = std::min(mn.x, p.x); mn.y = std::min(mn.y, p.y); mn.z = std::min(mn.z, p.z);
+            mx.x = std::max(mx.x, p.x); mx.y = std::max(mx.y, p.y); mx.z = std::max(mx.z, p.z);
+        }
+        if (!any) return false;
+
+        float h = mx.y - mn.y;
+        if (!(h > 1e-3f)) return false;
+        mn.y -= h * Cfg::PadBottom; mx.y += h * Cfg::PadTop;
+        mn.x -= h * Cfg::PadSide;   mx.x += h * Cfg::PadSide;
+        mn.z -= h * Cfg::PadSide;   mx.z += h * Cfg::PadSide;
+        return true;
     }
 
     bool W2S(const V3& w, float sx, float sy, float screenH, ImVec2& out)
@@ -228,9 +323,9 @@ namespace
         if (!ilReady)       std::snprintf(t, sizeof t, "ESP: IL2CPP not ready");
         else if (!A.ready)  std::snprintf(t, sizeof t, "ESP: missing %s", A.missing.c_str());
         else std::snprintf(t, sizeof t,
-            "ESP pc=%d loc=%d noPl=%d noSk=%d noBd=%d cam=%d | team=%d dead=%d bnd=%d beh=%d tiny=%d draw=%d",
-            S.pc, S.local, S.noPlayer, S.noSkel, S.noBody, camOk ? 1 : 0,
-            S.teamSkipped, S.dead, S.boundsBad, S.behind, S.tiny, S.drawn);
+            "ESP pc=%d loc=%d noSk=%d noBd=%d bones=%d cam=%d | team=%d dead=%d bnd=%d beh=%d tiny=%d fb=%d draw=%d",
+            S.pc, S.local, S.noSkel, S.noBody, S.withBones, camOk ? 1 : 0,
+            S.teamSkipped, S.dead, S.boundsBad, S.behind, S.tiny, S.fallback, S.drawn);
         dl->AddText(ImVec2(11, 61), IM_COL32(0, 0, 0, 255), t);
         dl->AddText(ImVec2(10, 60), IM_COL32(255, 255, 0, 255), t);
     }
@@ -253,7 +348,7 @@ void visuals::run()
     }
 
     bool camOk = il::ValidPtr(F.camera);
-    S.teamSkipped = S.dead = S.boundsBad = S.behind = S.tiny = S.drawn = 0;
+    S.teamSkipped = S.dead = S.boundsBad = S.behind = S.tiny = S.drawn = S.fallback = 0;
 
     int sw = il::InvokeBoxed<int>(A.mScreenW, nullptr, nullptr);
     int sh = il::InvokeBoxed<int>(A.mScreenH, nullptr, nullptr);
@@ -264,20 +359,39 @@ void visuals::run()
 
     for (const Ent& e : F.ents) {
         if (F.haveLocal && !F.localTeam.empty() && e.team == F.localTeam) { S.teamSkipped++; continue; }
-        if (il::Read<uint8_t>(e.pc + Cfg::PC_IsDeath)) { S.dead++; continue; }
 
-        Bounds bb = il::InvokeBoxed<Bounds>(A.mGetBounds, (void*)e.body, nullptr);
-        if (!Finite(bb.center) || !Finite(bb.extents)) { S.boundsBad++; continue; }
+        // Смерть: любой из признаков. Если геттер не отработал, признак не считается сработавшим.
+        int hp = 0; bool hpOk = CallInt(A.mPcHealth, (void*)e.pc, hp);
+        bool alive = true; bool aliveOk = CallBool(A.mPlayerIsAlive, (void*)e.player, alive);
+        if (il::Read<uint8_t>(e.pc + Cfg::PC_IsDeath) || il::Read<uint8_t>(e.pc + Cfg::PC_IsRagdolling) ||
+            (aliveOk && !alive) || (hpOk && hp <= 0)) { S.dead++; continue; }
 
-        V3 feet{ bb.center.x, bb.center.y - bb.extents.y, bb.center.z };
-        V3 head{ bb.center.x, bb.center.y + bb.extents.y, bb.center.z };
-        ImVec2 sf, sh2;
-        if (!W2S(feet, sx, sy, (float)sh, sf) || !W2S(head, sx, sy, (float)sh, sh2)) { S.behind++; continue; }
+        // Мировой AABB: по костям, иначе по bounds рендерера.
+        V3 mn{}, mx{};
+        if (!BoneAABB(e, mn, mx)) {
+            Bounds bb = il::InvokeBoxed<Bounds>(A.mGetBounds, (void*)e.body, nullptr);
+            if (!Finite(bb.center) || !Finite(bb.extents)) { S.boundsBad++; continue; }
+            mn = { bb.center.x - bb.extents.x, bb.center.y - bb.extents.y, bb.center.z - bb.extents.z };
+            mx = { bb.center.x + bb.extents.x, bb.center.y + bb.extents.y, bb.center.z + bb.extents.z };
+            S.fallback++;
+        }
 
-        float h = sf.y - sh2.y;
+        // 8 углов в экран; если хоть один за камерой, пропускаем.
+        float minX = 1e9f, minY = 1e9f, maxX = -1e9f, maxY = -1e9f;
+        bool okAll = true;
+        for (int i = 0; i < 8 && okAll; i++) {
+            V3 c{ (i & 1) ? mx.x : mn.x, (i & 2) ? mx.y : mn.y, (i & 4) ? mx.z : mn.z };
+            ImVec2 s;
+            if (!W2S(c, sx, sy, (float)sh, s)) { okAll = false; break; }
+            minX = std::min(minX, s.x); maxX = std::max(maxX, s.x);
+            minY = std::min(minY, s.y); maxY = std::max(maxY, s.y);
+        }
+        if (!okAll) { S.behind++; continue; }
+
+        float h = maxY - minY;
         if (h < 4.f || h > disp.y * 3.f) { S.tiny++; continue; }
-        float w = h * Cfg::BoxWidthRatio;
-        ImVec2 a(sf.x - w * 0.5f, sh2.y), b(sf.x + w * 0.5f, sf.y);
+        ImVec2 a(minX, minY), b(maxX, maxY);
+        ImVec2 sf((minX + maxX) * 0.5f, maxY);   // низ-центр бокса
         S.drawn++;
 
         if (boxFill) dl->AddRectFilled(a, b, Col(box_fill_color));
@@ -288,7 +402,6 @@ void visuals::run()
             } else CornerBox(dl, a, b, Col(box_color));
         }
 
-        int hp = A.mPcHealth ? il::InvokeBoxed<int>(A.mPcHealth, (void*)e.pc, nullptr) : 0;
         if (healthBar || healthBarText) {
             float frac = std::clamp((float)hp / Cfg::MaxHealth, 0.f, 1.f);
             if (healthBar) {
