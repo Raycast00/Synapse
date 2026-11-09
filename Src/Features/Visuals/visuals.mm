@@ -1,4 +1,3 @@
-#import <Foundation/Foundation.h>
 #include "visuals.h"
 #include "il2cpp/il2cpp.h"
 #include "imgui.h"
@@ -54,7 +53,7 @@ namespace
         auto need = [&](void* p, const char* n) { if (!p) { A.missing += n; A.missing += ' '; } };
 
         A.kPlayerController = il::Class("", "PlayerController", "Assembly-CSharp");
-        A.kSkeleton         = il::Class("", "PlayerSkeleton", "Assembly-CSharp");
+        A.kSkeleton =         il::Class("ScarletWork.Game", "PlayerSkeleton", "Assembly-CSharp");
         A.kBomb             = il::Class("ScarletWork.Game", "Bomb", "Assembly-CSharp");
         A.kPlayer           = il::Class("Photon.Realtime", "Player", "PhotonRealtime");
 
@@ -141,83 +140,56 @@ namespace
     } F;
 
     void Refresh()
-{
-    F.ents.clear();
-    F.camera = 0; F.haveLocal = false; F.localTeam.clear(); F.bomb = 0;
-    S.pc = S.local = S.noPlayer = S.noSkel = S.noBody = 0;
+    {
+        F.ents.clear();
+        F.camera = 0; F.haveLocal = false; F.localTeam.clear(); F.bomb = 0;
+        S.pc = S.local = S.noPlayer = S.noSkel = S.noBody = 0;
 
-    // 1. Находим ВСЕ скелеты на карте (включая ботов и игроков)
-    std::vector<uintptr_t> skeletons = il::FindObjectsOfType(A.kSkeleton);
-    if (skeletons.empty()) {
-        NSLog(@"[ESP] No skeletons found on map!");
-    }
+        for (uintptr_t pc : il::FindObjectsOfType(A.kPlayerController)) {
+            S.pc++;
+            uintptr_t player = il::Read<uintptr_t>(pc + Cfg::PC_Player);
+            if (!il::ValidPtr(player)) { S.noPlayer++; continue; }
 
-    // 2. Проходимся по контроллерам игроков
-    for (uintptr_t pc : il::FindObjectsOfType(A.kPlayerController)) {
-        S.pc++;
-        uintptr_t player = il::Read<uintptr_t>(pc + Cfg::PC_Player);
-        if (!il::ValidPtr(player)) { S.noPlayer++; continue; }
+            std::string team = Str(il::Invoke(A.mPlayerTeam, (void*)player, nullptr));
 
-        std::string team = Str(il::Invoke(A.mPlayerTeam, (void*)player, nullptr));
-
-        // Если это локальный игрок (мы)
-        if (il::Read<uint8_t>(player + Cfg::Player_IsLocal)) {
-            S.local++;
-            uintptr_t cam = il::Read<uintptr_t>(pc + Cfg::PC_MainCamera);
-            if (il::ValidPtr(cam)) F.camera = cam;
-            F.localPos  = WorldPos((void*)pc);
-            F.localTeam = team;
-            F.haveLocal = true;
-            continue;
-        }
-
-        // 3. Ищем скелет, который принадлежит этому игроку
-        // Мы получаем Transform игрока и сравниваем дистанцию
-        V3 playerPos = WorldPos((void*)pc);
-        uintptr_t bestSkel = 0;
-        float minDist = 2.0f; // Игрок и его скелет находятся в радиусе 2 метров
-
-        for (uintptr_t skel : skeletons) {
-            V3 skelPos = WorldPos((void*)skel);
-            float dx = playerPos.x - skelPos.x;
-            float dy = playerPos.y - skelPos.y;
-            float dz = playerPos.z - skelPos.z;
-            float dist = sqrt(dx*dx + dy*dy + dz*dz);
-            
-            if (dist < minDist) {
-                minDist = dist;
-                bestSkel = skel;
+            if (il::Read<uint8_t>(player + Cfg::Player_IsLocal)) {
+                S.local++;
+                uintptr_t cam = il::Read<uintptr_t>(pc + Cfg::PC_MainCamera);
+                if (il::ValidPtr(cam)) F.camera = cam;
+                F.localPos  = WorldPos((void*)pc);
+                F.localTeam = team;
+                F.haveLocal = true;
+                continue;
             }
+
+            Ent e;
+            e.pc   = pc;
+            e.team = team;
+            e.name = Str((void*)il::Read<uintptr_t>(player + Cfg::Player_Nick));
+
+            bool inc = true;
+            void* a[2] = { il::Type(A.kSkeleton), &inc };
+            e.skeleton = (uintptr_t)il::Invoke(A.mGetCompInChildren, (void*)pc, a);
+            if (!il::ValidPtr(e.skeleton)) { S.noSkel++; continue; }
+
+            e.body = il::Read<uintptr_t>(e.skeleton + Cfg::Skel_Body);
+            if (!il::ValidPtr(e.body)) e.body = il::Read<uintptr_t>(e.skeleton + Cfg::Skel_BodyLod);
+            if (!il::ValidPtr(e.body)) { S.noBody++; continue; }
+
+            void* wgo = il::Invoke(A.mSkelWeapon, (void*)e.skeleton, nullptr);
+            if (il::ValidPtr((uintptr_t)wgo))
+                e.weapon = Str(il::Invoke(A.mObjGetName, wgo, nullptr));
+
+            F.ents.push_back(std::move(e));
         }
 
-        if (!bestSkel) { S.noSkel++; continue; }
+        if (!F.camera) {
+            void* c = il::Invoke(A.mCamMain, nullptr, nullptr);
+            if (il::ValidPtr((uintptr_t)c)) F.camera = (uintptr_t)c;
+        }
 
-        Ent e;
-        e.pc   = pc;
-        e.team = team;
-        e.name = Str((void*)il::Read<uintptr_t>(player + Cfg::Player_Nick));
-        e.skeleton = bestSkel;
-
-        // 4. Читаем меш тела
-        e.body = il::Read<uintptr_t>(e.skeleton + Cfg::Skel_Body);
-        if (!il::ValidPtr(e.body)) e.body = il::Read<uintptr_t>(e.skeleton + Cfg::Skel_BodyLod);
-        if (!il::ValidPtr(e.body)) { S.noBody++; continue; }
-
-        // 5. Читаем оружие
-        void* wgo = il::Invoke(A.mSkelWeapon, (void*)e.skeleton, nullptr);
-        if (il::ValidPtr((uintptr_t)wgo))
-            e.weapon = Str(il::Invoke(A.mObjGetName, wgo, nullptr));
-
-        F.ents.push_back(std::move(e));
-    }
-
-    if (!F.camera) {
-        void* c = il::Invoke(A.mCamMain, nullptr, nullptr);
-        if (il::ValidPtr((uintptr_t)c)) F.camera = (uintptr_t)c;
-    }
-
-    for (uintptr_t b : il::FindObjectsOfType(A.kBomb))
-        if (il::Read<uint8_t>(b + Cfg::Bomb_IsActive)) { F.bomb = b; break; }
+        for (uintptr_t b : il::FindObjectsOfType(A.kBomb))
+            if (il::Read<uint8_t>(b + Cfg::Bomb_IsActive)) { F.bomb = b; break; }
     }
 
     bool W2S(const V3& w, float sx, float sy, float screenH, ImVec2& out)

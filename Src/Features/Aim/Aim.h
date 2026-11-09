@@ -16,7 +16,7 @@ namespace aim
 
     inline bool drawFOV = false;
     inline float fov_radius = 180.f;
-    inline float fov_color[4]{ 1.f, 1.f, 1.f, 0.25f };
+    inline float fov_color[4]{ 1.f, 1.f, 1.f, 0.5f };
 
     inline bool fovCheck = false;
 

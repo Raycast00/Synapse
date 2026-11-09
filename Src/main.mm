@@ -198,7 +198,7 @@ static bool   g_tLeave = false;
                 // BOMB
                 ImGui::SeparatorText("Bomb");
             }
-
+            
             if (ImGui::BeginTabItem("Aim"))
             {
                 ImGui::Checkbox("AimBot", &aim::aimbot);
