@@ -240,9 +240,13 @@ static bool   g_tLeave = false;
 
             if (ImGui::BeginTabItem("Rage"))
             {
-                ImGui::Checkbox("Infinity Ammo", &rage::infinityAmmo);
-                ImGui::Checkbox("No Recoil", &rage::noRecoil);
-                ImGui::Checkbox("No Spread", &rage::noSpread);
+                ImGui::Checkbox("Infinity Ammo", &rage::infinity_ammo);
+                ImGui::Checkbox("Fire Rate", &rage::fire_rate);
+                ImGui::Checkbox("Move Before Timer", &rage::MBT);
+                ImGui::Checkbox("Wallbang", &rage::wallbang);
+                ImGui::Checkbox("Air Jump", &rage::air_jump);
+                ImGui::Checkbox("No Recoil", &rage::no_recoil);
+                ImGui::Checkbox("No Spread", &rage::no_spread);
                 ImGui::EndTabItem();
             }
 
