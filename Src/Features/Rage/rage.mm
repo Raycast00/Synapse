@@ -3,6 +3,8 @@
 #include "il2cpp/il2cpp.h"
 #include <unordered_map>
 #include <vector>
+#include "imgui.h"
+#include <cstdio>
 
 using IL2CPP::Read;
 using IL2CPP::Write;
@@ -122,9 +124,22 @@ void rage::ApplyRecoilControl(bool enabled)
 
 static uintptr_t localPlayerController()
 {
-    uintptr_t cam = fpsCamera();
-    if (!ok(cam)) return 0;
-    return Read<uintptr_t>(cam + off::camPlayer);
+    static uintptr_t cached = 0;
+    static double nextRefresh = 0.0;
+    double now = ImGui::GetTime();
+    if (!ok(cached) || now >= nextRefresh) {
+        nextRefresh = now + 0.25;
+        cached = 0;
+        static void* klass = IL2CPP::Class("", "PlayerController", "Assembly-CSharp");
+        for (uintptr_t pc : IL2CPP::FindObjectsOfType(klass)) {
+            uintptr_t pl = Read<uintptr_t>(pc + 0x90);          // PlayerController._player
+            if (ok(pl) && Read<uint8_t>(pl + 0x1C)) {            // Photon Player.IsLocal
+                cached = pc;
+                break;
+            }
+        }
+    }
+    return cached;
 }
 
 static void applyInfinityAmmo()
@@ -165,9 +180,44 @@ static void applyAirJump()
     Write<uint8_t>(mv + off::pm_IsGrounded, 1);
 }
 
+static void drawStatus(bool ilReady)
+{
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    char l1[200], l2[200];
+
+    if (!ilReady) {
+        std::snprintf(l1, sizeof l1, "RAGE: IL2CPP not ready");
+        l2[0] = 0;
+    } else {
+        uintptr_t pc   = localPlayerController();
+        uintptr_t arms = ok(pc) ? Read<uintptr_t>(pc + off::pcArms) : 0;
+        uintptr_t mv   = ok(pc) ? Read<uintptr_t>(pc + off::pcMovement) : 0;
+
+        std::snprintf(l1, sizeof l1,
+            "RAGE tog: ammo=%d rate=%d mbt=%d air=%d rec=%d spr=%d | pc=%d arms=%d mv=%d wpn=%d cam=%d",
+            rage::infinity_ammo, rage::fire_rate, rage::MBT, rage::air_jump, rage::no_recoil, rage::no_spread,
+            ok(pc), ok(arms), ok(mv), (int)g_weapons.size(), ok(fpsCamera()));
+
+        std::snprintf(l2, sizeof l2, "RAGE val: mag=%d res=%d timeFired=%.2f freezing=%d grounded=%d",
+            ok(arms) ? (int)Read<int16_t>(arms + off::arms_MagazineCapacity) : -1,
+            ok(arms) ? (int)Read<int16_t>(arms + off::arms_Capacity) : -1,
+            ok(arms) ? Read<float>(arms + off::arms_TimeFired) : -1.f,
+            ok(mv) ? (int)Read<uint8_t>(mv + off::pm_IsFreezing) : -1,
+            ok(mv) ? (int)Read<uint8_t>(mv + off::pm_IsGrounded) : -1);
+    }
+    dl->AddText(ImVec2(11, 81), IM_COL32(0, 0, 0, 255), l1);
+    dl->AddText(ImVec2(10, 80), IM_COL32(0, 255, 255, 255), l1);
+    if (l2[0]) {
+        dl->AddText(ImVec2(11, 97), IM_COL32(0, 0, 0, 255), l2);
+        dl->AddText(ImVec2(10, 96), IM_COL32(0, 255, 255, 255), l2);
+    }
+}
+
 void rage::run()
 {
-    if (!IL2CPP::Init()) return;
+    bool ilReady = IL2CPP::Init();
+    drawStatus(ilReady);
+    if (!ilReady) return;
 
     static bool lastSpread = false, lastRecoil = false, pending = false;
     if (rage::no_spread != lastSpread || rage::no_recoil != lastRecoil) {
@@ -189,6 +239,4 @@ void rage::run()
     if (rage::fire_rate)     applyFireRate();
     if (rage::MBT)           applyMBT();
     if (rage::air_jump)      applyAirJump();
-
-    // rage::wallbang: не реализовано, нужен хук BulletPenetration.Opaque / ArmsController.CastPenetration.
 }
