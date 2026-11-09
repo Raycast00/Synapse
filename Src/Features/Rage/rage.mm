@@ -56,6 +56,9 @@ namespace off {
     // PlayerMovement
     constexpr uintptr_t pm_IsFreezing = 0x164;  // bool, читается в приватном get_Frozen()
     constexpr uintptr_t pm_IsGrounded = 0x15C;  // bool, public _isGrounded
+
+    constexpr uintptr_t pm_NoclipEnabled = 0x38; // public bool NoclipEnabled
+    constexpr uintptr_t pm_NoclipSpeed   = 0x3C; // private float _noclipSpeed
 }
 
 struct Orig {
@@ -148,7 +151,7 @@ static void applyInfinityAmmo()
     if (!ok(pc)) return;
     uintptr_t arms = Read<uintptr_t>(pc + off::pcArms);
     if (!ok(arms)) return;
-    
+
     Write<int16_t>(arms + off::arms_MagazineCapacity, 999);
     Write<int16_t>(arms + off::arms_Capacity, 999);
 }
@@ -180,6 +183,26 @@ static void applyAirJump()
     uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement);
     if (!ok(mv)) return;
     Write<uint8_t>(mv + off::pm_IsGrounded, 1);
+}
+
+static void applyFly()
+{
+    uintptr_t pc = localPlayerController();
+    if (!ok(pc)) return;
+    
+    uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement); // PlayerMovement (0x40 в PlayerController)
+    if (!ok(mv)) return;
+
+    if (rage::fly) {
+        // Включаем Noclip
+        Write<uint8_t>(mv + off::pm_NoclipEnabled, 1);
+        
+        // Опционально: ускоряем полет (например, в 3 раза быстрее)
+        Write<float>(mv + off::pm_NoclipSpeed, rage::fly_speed); // По умолчанию там что-то вроде 10.0f
+    } else {
+        // Выключаем Noclip
+        Write<uint8_t>(mv + off::pm_NoclipEnabled, 0);
+    }
 }
 
 static void drawStatus(bool ilReady)
@@ -241,4 +264,5 @@ void rage::run()
     if (rage::fire_rate)     applyFireRate();
     if (rage::MBT)           applyMBT();
     if (rage::air_jump)      applyAirJump();
+    if (rage::fly) applyFly();
 }

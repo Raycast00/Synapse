@@ -10,7 +10,10 @@ namespace rage
     inline bool no_recoil = false;
     inline bool no_spread = false;
 
-    // Actor
+    // Player
     inline bool MBT = false;
     inline bool air_jump = false;
+
+    inline bool fly = false;
+    inline float fly_speed = 20.f;
 }
