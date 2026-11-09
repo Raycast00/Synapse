@@ -130,22 +130,22 @@ void rage::run()
     }
 
     static bool lastSpread = false, lastRecoil = false, pending = false;
-    if (rage::noSpread != lastSpread || rage::noRecoil != lastRecoil) {
-        lastSpread = rage::noSpread;
-        lastRecoil = rage::noRecoil;
+    if (rage::no_spread != lastSpread || rage::no_recoil != lastRecoil) {
+        lastSpread = rage::no_spread;
+        lastRecoil = rage::no_recoil;
         pending = true;
     }
     if (pending) {
         refreshWeapons();
         if (!g_weapons.empty()) {
             for (uintptr_t wp : g_weapons)
-                applyWeapon(wp, rage::noSpread, rage::noRecoil);
+                applyWeapon(wp, rage::no_spread, rage::no_recoil);
             NSLog(@"[rage] applied to %d weapons (spread=%d recoil=%d)",
-                  (int)g_weapons.size(), (int)rage::noSpread, (int)rage::noRecoil);
+                  (int)g_weapons.size(), (int)rage::no_spread, (int)rage::no_recoil);
             pending = false;
         }
     }
 
-    if (rage::noRecoil)
+    if (rage::no_recoil)
         applyCameraRecoil();
 }
