@@ -197,8 +197,10 @@ static bool   g_tLeave = false;
 
                 // BOMB
                 ImGui::SeparatorText("Bomb");
+
+                ImGui::Checkbox("Timer", &visuals::bomb_timer_bar);
             }
-            
+
             if (ImGui::BeginTabItem("Aim"))
             {
                 ImGui::Checkbox("AimBot", &aim::aimbot);
