@@ -1,3 +1,4 @@
+#import <Foundation/Foundation.h>
 #include "visuals.h"
 #include "il2cpp/il2cpp.h"
 #include "imgui.h"
