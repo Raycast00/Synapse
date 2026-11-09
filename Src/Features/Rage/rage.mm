@@ -255,7 +255,7 @@ static void drawStatus(bool ilReady)
 
         std::snprintf(l1, sizeof l1,
             "RAGE tog: ammo=%d rate=%d mbt=%d air=%d rec=%d spr=%d | pc=%d arms=%d mv=%d wpn=%d cam=%d",
-            rage::infinity_ammo, rage::fire_rate, rage::MBT, rage::air_jump, rage::no_recoil, rage::no_spread,
+            rage::infinity_ammo, rage::rapid_fire, rage::MBT, rage::air_jump, rage::no_recoil, rage::no_spread,
             ok(pc), ok(arms), ok(mv), (int)g_weapons.size(), ok(fpsCamera()));
 
         std::snprintf(l2, sizeof l2, "RAGE val: mag=%d res=%d timeFired=%.2f freezing=%d grounded=%d",
