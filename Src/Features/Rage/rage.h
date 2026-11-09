@@ -5,7 +5,8 @@ namespace rage
 
     // Weapon
     inline bool infinity_ammo = false;
-    inline bool fire_rate = false;
+    inline bool rapid_fire = false;
+    inline float rapid_fire_speed = 0.02f;
     inline bool wallbang = false;
     inline bool no_recoil = false;
     inline bool no_spread = false;

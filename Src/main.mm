@@ -253,7 +253,7 @@ static bool   g_tLeave = false;
                 ImGui::SeparatorText("Weapon");
 
                 ImGui::Checkbox("Infinity Ammo", &rage::infinity_ammo);
-                ImGui::Checkbox("Fire Rate", &rage::fire_rate);
+                ImGui::Checkbox("Rapid Fire", &rage::rapid_fire);
                 ImGui::Checkbox("No Recoil", &rage::no_recoil);
                 ImGui::Checkbox("No Spread", &rage::no_spread);
                 ImGui::EndTabItem();

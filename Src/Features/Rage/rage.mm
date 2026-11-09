@@ -109,6 +109,19 @@ static void applyWeapon(uintptr_t wp, bool spread, bool recoil)
     }
 }
 
+static void applyRapidFire()
+{
+    uintptr_t pc = localPlayerController();
+    if (!ok(pc)) return;
+    uintptr_t arms = Read<uintptr_t>(pc + off::pcArms);
+    if (!ok(arms)) return;
+
+    if (rage::rapid_fire) {
+        Write<float>(arms + off::arms_TimeFired, 10.0f);
+        Write<float>(arms + off::arms_NextDryFire, 0.0f);
+    }
+}
+
 static void applyCameraRecoil()
 {
     uintptr_t cam = fpsCamera();
@@ -163,8 +176,13 @@ static void applyFireRate()
     uintptr_t arms = Read<uintptr_t>(pc + off::pcArms);
     if (!ok(arms)) return;
 
-    Write<float>(arms + off::arms_TimeFired, 10.0f);
-    Write<float>(arms + off::arms_NextDryFire, 10.0f);
+    if (rage::rapid_fire)
+    {
+        float value = 1.0f / (rage::rapid_fire_speed + 0.001f);
+        Write<float>(arms + off::arms_TimeFired, value);
+        
+        Write<float>(arms + off::arms_NextDryFire, 0.0f); 
+    }
 }
 
 static void applyMBT()
@@ -278,7 +296,7 @@ void rage::run()
     if (rage::no_recoil) applyCameraRecoil();
 
     if (rage::infinity_ammo) applyInfinityAmmo();
-    if (rage::fire_rate)     applyFireRate();
+    if (rage::rapid_fire) applyRapidFire();
     if (rage::MBT)           applyMBT();
     if (rage::air_jump)      applyAirJump();
     if (rage::super_jump)    applySuperJump();
