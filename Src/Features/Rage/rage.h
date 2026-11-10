@@ -6,7 +6,7 @@ namespace rage
     // Weapon
     inline bool infinity_ammo = false;
     inline bool rapid_fire = false;
-    inline float rapid_fire_speed = 0.02f;
+    inline float rapid_fire_speed = 0.001f;
     inline bool wallbang = false;
     inline bool perfect_accuracy = false;
     inline bool no_recoil = false;
@@ -20,4 +20,8 @@ namespace rage
     inline float jump_strength = 200.f;
 
     inline bool no_fall_damage = false;
+
+    // Bomb
+    inline bool fast_defuse = false;
+    inline bool auto_bomb_win = false;
 }

@@ -256,6 +256,12 @@ static bool   g_tLeave = false;
                 ImGui::Checkbox("Perfect Accuracy", &rage::perfect_accuracy);
                 ImGui::Checkbox("No Recoil", &rage::no_recoil);
                 ImGui::Checkbox("No Spread", &rage::no_spread);
+
+                ImGui::SeparatorText("Bomb");
+
+                ImGui::Checkbox("Fast Defuse", &rage::fast_defuse);
+                ImGui::Checkbox("Auto Bomb Win", &rage::auto_bomb_win);
+
                 ImGui::EndTabItem();
             }
 
