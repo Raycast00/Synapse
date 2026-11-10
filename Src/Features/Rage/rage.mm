@@ -193,6 +193,21 @@ static void applyNoFallDamage()
     Write<float>(mv + 0xB4, 0.0f);
 }
 
+static void applyFriendlyFire()
+{
+    if (!rage::friendly_fire) return;
+
+    static void* gcClass = IL2CPP::Class("ScarletWork.Game", "GameController", "Assembly-CSharp");
+    if (!gcClass) return;
+
+    static void* instanceField = IL2CPP::Field(gcClass, "<Instance>k__BackingField");
+    if (!instanceField) instanceField = IL2CPP::Field(gcClass, "Instance");
+    uintptr_t gc = IL2CPP::StaticField<uintptr_t>(instanceField);
+    if (!ok(gc)) return;
+
+    Write<uint8_t>(gc + off::gc_FriendlyFire, 1);
+}
+
 static void drawStatus(bool ilReady)
 {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
@@ -246,10 +261,11 @@ void rage::run()
             pending = false;
         }
     }
+    
     if (rage::no_recoil) applyCameraRecoil();
-
     if (rage::infinity_ammo) applyInfinityAmmo();
     if (rage::rapid_fire) applyRapidFire();
     if (rage::MBT)           applyMBT();
     if (rage::no_fall_damage) applyNoFallDamage();
+    if (rage::friendly_fire) applyFriendlyFire();
 }

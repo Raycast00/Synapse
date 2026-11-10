@@ -250,6 +250,7 @@ static bool   g_tLeave = false;
                 ImGui::Checkbox("Move Before Timer", &rage::MBT);
                 ImGui::Checkbox("Wallbang", &rage::wallbang);
                 ImGui::Checkbox("No Fall Damage", &rage::no_fall_damage);
+                ImGui::Checkbox("Friendly Fire", &rage::friendly_fire);
 
                 ImGui::SeparatorText("Weapon");
 
