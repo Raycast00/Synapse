@@ -17,12 +17,14 @@ using field_name_t    = void* (*)(void*, const char*);
 using static_get_t    = void  (*)(void*, void*);
 using class_type_t    = void* (*)(void*);          // il2cpp_class_get_type
 using type_obj_t      = void* (*)(void*);           // il2cpp_type_get_object
+using obj_get_class_t = void* (*)(void*);
 
 static domain_get_t    s_domain_get;
 static thread_attach_t s_thread_attach;
 static asm_open_t      s_assembly_open;
 static asm_image_t     s_assembly_image;
 static class_name_t    s_class_from_name;
+static obj_get_class_t s_object_get_class;
 static method_name_t   s_get_method;
 static invoke_t        s_runtime_invoke;
 static field_name_t    s_get_field;
@@ -65,6 +67,7 @@ bool Init()
     s_assembly_open   = (asm_open_t)dlsym(h, "il2cpp_domain_assembly_open");
     s_assembly_image  = (asm_image_t)dlsym(h, "il2cpp_assembly_get_image");
     s_class_from_name = (class_name_t)dlsym(h, "il2cpp_class_from_name");
+    s_object_get_class = (obj_get_class_t)dlsym(h, "il2cpp_object_get_class");
     s_get_method      = (method_name_t)dlsym(h, "il2cpp_class_get_method_from_name");
     s_runtime_invoke  = (invoke_t)dlsym(h, "il2cpp_runtime_invoke");
     s_get_field       = (field_name_t)dlsym(h, "il2cpp_class_get_field_from_name");
@@ -152,6 +155,12 @@ void* Type(void* klass)
     void* obj = t ? s_type_get_object(t) : nullptr;
     s_typeCache[klass] = obj;
     return obj;
+}
+
+void* ClassOf(void* obj)
+{
+    if (!s_ready || !ValidPtr((uintptr_t)obj)) return nullptr;
+    return s_object_get_class(obj);
 }
 
 void StaticFieldRaw(void* field, void* out)

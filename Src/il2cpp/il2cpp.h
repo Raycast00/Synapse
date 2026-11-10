@@ -11,6 +11,7 @@ namespace IL2CPP {
     void* Image(const char* assemblyName = "Assembly-CSharp");
 
     void* Class(const char* ns, const char* name, const char* assemblyName = "Assembly-CSharp");
+    void* ClassOf(void* obj);
     void* Method(void* klass, const char* name, int argc);
     void* Field(void* klass, const char* name);
     void* Type(void* klass);

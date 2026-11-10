@@ -8,6 +8,7 @@ namespace aim
 
     inline bool automatic_fire = false;
     inline bool aim_through_walls = false;
+    inline bool aimbot_prediction = false;
 
     inline bool draw_fov = false;
     inline float fov_radius = 180.f;
