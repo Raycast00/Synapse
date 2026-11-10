@@ -169,6 +169,20 @@ static void applyRapidFire()
     }
 }
 
+static void applyPerfectAccuracy()
+{
+    uintptr_t pc = localPlayerController();
+    if (!ok(pc)) return;
+    uintptr_t arms = Read<uintptr_t>(pc + off::pcArms);
+    if (!ok(arms)) return;
+
+    if (rage::perfect_accuracy) {
+        Write<float>(arms + off::arms_AccuracyMult, 0.0f);
+        Write<float>(arms + off::arms_RecoilMult, 0.0f);
+        Write<float>(arms + off::arms_AccuracyAdditive, 0.0f);
+    }
+}
+
 static void applyMBT()
 {
     uintptr_t pc = localPlayerController();
@@ -205,23 +219,6 @@ static void applyNoFallDamage()
     
     Write<float>(mv + 0xB8, 0.0f);
     Write<float>(mv + 0xB4, 0.0f);
-}
-
-static void applyGodmode()
-{
-    uintptr_t pc = localPlayerController();
-    if (!ok(pc)) return;
-    uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement);
-    if (!ok(mv)) return;
-    
-    if (rage::godmode)
-    {
-        Write<float>(mv + 0x1B0, 999999.0f); 
-    }
-    else
-    {
-        Write<float>(mv + 0x1B0, 100.0f); 
-    }
 }
 
 static void drawStatus(bool ilReady)
@@ -281,6 +278,7 @@ void rage::run()
 
     if (rage::infinity_ammo) applyInfinityAmmo();
     if (rage::rapid_fire) applyRapidFire();
+    if (rage::perfect_accuracy) applyPerfectAccuracy();
     if (rage::MBT)           applyMBT();
     if (rage::air_jump)      applyAirJump();
     if (rage::super_jump)    applySuperJump();

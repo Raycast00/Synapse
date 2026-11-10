@@ -248,12 +248,12 @@ static bool   g_tLeave = false;
                 ImGui::Checkbox("Super Jump", &rage::super_jump);
                 ImGui::SliderFloat("Jump Strength", &rage::jump_strength, 1.f, 20.f, "%.1f");
                 ImGui::Checkbox("No Fall Damage", &rage::no_fall_damage);
-                ImGui::Checkbox("Godmode", &rage::godmode);
 
                 ImGui::SeparatorText("Weapon");
 
                 ImGui::Checkbox("Infinity Ammo", &rage::infinity_ammo);
                 ImGui::Checkbox("Rapid Fire", &rage::rapid_fire);
+                ImGui::Checkbox("Perfect Accuracy", &rage::perfect_accuracy);
                 ImGui::Checkbox("No Recoil", &rage::no_recoil);
                 ImGui::Checkbox("No Spread", &rage::no_spread);
                 ImGui::EndTabItem();

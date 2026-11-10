@@ -8,6 +8,7 @@ namespace rage
     inline bool rapid_fire = false;
     inline float rapid_fire_speed = 0.02f;
     inline bool wallbang = false;
+    inline bool perfect_accuracy = false;
     inline bool no_recoil = false;
     inline bool no_spread = false;
 
@@ -19,5 +20,4 @@ namespace rage
     inline float jump_strength = 200.f;
 
     inline bool no_fall_damage = false;
-    inline bool godmode = false;
 }
