@@ -28,8 +28,8 @@ void init() {
     int after  = selftest_target(s_selftest_input); // 43, если хук работает
 
     bool ok = (rc == 0 && after == before + 1);
-    NSLog(@"[Hooks] Dobby %s self-test %s (code=%d, %d -> %d)",
-          DobbyGetVersion(), ok ? "OK" : "FAILED", rc, before, after);
+    NSLog(@"[Hooks] Dobby self-test %s (code=%d, %d -> %d)",
+          ok ? "OK" : "FAILED", rc, before, after);
 }
 
 // ============================================================================
