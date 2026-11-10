@@ -41,8 +41,16 @@ namespace
         constexpr double CalibWindow     = 0.20;     // окно калибровки, сек
         constexpr float  MinDelta        = 0.30f;    // минимальное изменение для калибровочного сэмпла
         constexpr float  UncalibStepYaw  = 0.5f;     // макс. шаг по яву (градусы) до калибровки
-        constexpr float  UncalibStepPit   = 0.25f;   // макс. шаг записи в rotationX до калибровки
+        constexpr float  UncalibStepPit  = 0.25f;    // макс. шаг записи в rotationX до калибровки
         constexpr int    CalibNeeded     = 5;        // сэмплов для "откалибровано"
+
+        // Не откалибровано, подбирать в игре.
+        constexpr float  KeepRadiusMul  = 1.5f;      // держим текущую цель, пока она внутри fov_radius*этот множитель
+        constexpr double LoseGraceSec  = 0.15;       // сколько секунд терпим потерю цели (окклюзия на кадр, моргание), прежде чем сбросить
+        constexpr float  MaxDegPerSec  = 220.f;      // жёсткий потолок скорости поворота, не зависит от aimbot_smoothing
+
+        constexpr int HiddenByRound = 1, HiddenBySpectate = 2, HiddenByOcclusion = 4;   // const в PlayerController
+        constexpr int HiddenAlways  = HiddenByRound | HiddenBySpectate;   // не про стены, блокирует всегда
     }
 
     struct Api
@@ -152,6 +160,10 @@ namespace
         std::string localTeam;
         double last = -1.0;
         int nPc = 0, nLocal = 0, nNoSkel = 0;
+
+        uintptr_t lockedPc = 0;
+        uintptr_t prevLock = 0;
+        double    lostSince = -1.0;
     } W;
 
     void Refresh()
@@ -179,6 +191,12 @@ namespace
                 }
                 W.haveLocal = true;
                 W.localTeam = team;
+                if (W.lock != W.prevLock) {           // новый матч/респавн — старое состояние больше не актуально
+                    C.ResetTrack();
+                    W.lockedPc = 0;
+                    W.lostSince = -1.0;
+                    W.prevLock = W.lock;
+                }
                 continue;                                   // себя в цели не берём
             }
 
@@ -202,10 +220,15 @@ namespace
 
     // Видимость по встроенному окклюдеру игры (PlayerCulling): за препятствием игра сама ставит
     // бит HiddenByOcclusion в PlayerController._hiddenMask и прячет модель игрока.
-    bool IsVisible(const Cand& c)
+    bool IsAlwaysHidden(const Cand& c)
     {
         int m = il::Read<int>(c.pc + Cfg::PC_HiddenMask);
-        return (m & (Cfg::HiddenByRound | Cfg::HiddenBySpectate | Cfg::HiddenByOcclusion)) == 0;
+        return (m & Cfg::HiddenAlways) != 0;
+    }
+    bool IsOccluded(const Cand& c)
+    {
+        int m = il::Read<int>(c.pc + Cfg::PC_HiddenMask);
+        return (m & Cfg::HiddenByOcclusion) != 0;
     }
 
     double g_nextRoll = 0.0;
@@ -287,7 +310,7 @@ namespace
             if (std::fabs(s) < 0.02f) { bad++; return; }
             bad = 0;
             s = std::clamp(s, -200.f, 200.f);
-            g = (n == 0) ? s : g + 0.15f * (s - g);
+            g = (n == 0) ? s : g + 0.08f * (s - g);
             n++;
         };
         upd(cur.cy - ref->cy, cur.ay - ref->ay, C.gY, C.nY, C.badY);
@@ -322,6 +345,7 @@ namespace
                           W.nPc, W.nLocal, il::ValidPtr(cam), il::ValidPtr(W.lock), il::ValidPtr(W.body));
             Status(dl, st);
             C.ResetTrack();
+            W.lockedPc = 0; W.lostSince = -1.0;
             return;
         }
 
@@ -351,20 +375,54 @@ namespace
         while (!C.hist.empty() && now - C.hist.front().t > 0.6) C.hist.erase(C.hist.begin());
         CalibUpdate(now);
 
-        // Выбор цели: ближайшая к центру в пределах FOV.
-        const Cand* best = nullptr; V3 bestPos{}; float bestD = aim::fov_radius; int inFov = 0, hid = 0;
-        for (const Cand& c : W.cands) {
-            if (W.haveLocal && !W.localTeam.empty() && c.team == W.localTeam) continue;
-            if (IsDead(c)) continue;
-            if (!aim::aim_through_walls && !IsVisible(c)) { hid++; continue; }
+        // Выбор цели: сначала пробуем удержать уже выбранную, чтобы не дёргаться на границе FOV.
+        auto qualifies = [&](const Cand& c, ImVec2& s, float& d) -> bool {
+            if (W.haveLocal && !W.localTeam.empty() && c.team == W.localTeam) return false;
+            if (IsDead(c)) return false;
+            if (IsAlwaysHidden(c)) return false;                                   // раунд ещё не идёт / спектейт — не про стены
+            if (!aim::aim_through_walls && IsOccluded(c)) hid++;
             V3 p;
-            if (!AimPoint(c, p)) continue;
-            ImVec2 s;
-            if (!W2S(cam, p, sx, sy, (float)sh, s)) continue;
-            float d = std::hypot(s.x - center.x, s.y - center.y);
-            if (d < aim::fov_radius) inFov++;
-            if (d < bestD) { bestD = d; best = &c; bestPos = p; }
+            if (!AimPoint(c, p)) return false;
+            if (!W2S(cam, p, sx, sy, (float)sh, s)) return false;
+            d = std::hypot(s.x - center.x, s.y - center.y);
+            return true;
+        };
+
+        const Cand* best = nullptr; V3 bestPos{}; int inFov = 0, hid = 0;
+
+        if (W.lockedPc) {
+            for (const Cand& c : W.cands) {
+                if (c.pc != W.lockedPc) continue;
+                ImVec2 s; float d;
+                if (qualifies(c, s, d) && d < aim::fov_radius * Cfg::KeepRadiusMul) {
+                    V3 p; AimPoint(c, p);
+                    best = &c; bestPos = p;
+                    W.lostSince = -1.0;
+                } else if (W.lostSince < 0.0) {
+                    W.lostSince = now;
+                }
+                break;
+            }
+            if (!best && W.lostSince >= 0.0 && now - W.lostSince < Cfg::LoseGraceSec) {
+                // в пределах льготного времени просто не трогаем прицел в этом кадре, цель не сбрасываем
+            } else if (!best) {
+                W.lockedPc = 0;
+                W.lostSince = -1.0;
+            }
         }
+
+        for (const Cand& c : W.cands) {
+            if (c.pc == W.lockedPc) continue;
+            ImVec2 s; float d;
+            if (!qualifies(c, s, d)) continue;
+            if (!aim::aim_through_walls && !IsVisible(c)) hid++;
+            if (d < aim::fov_radius) inFov++;
+            if (!best && d < aim::fov_radius) {
+                V3 p; AimPoint(c, p);
+                best = &c; bestPos = p;
+            }
+        }
+        if (best) W.lockedPc = best->pc;
 
         float eY = 0.f, eP = 0.f;
         bool wrote = false;
@@ -379,8 +437,12 @@ namespace
                 float s = aim::aimbot_smoothing;
                 float alpha = (s <= 1.f) ? 1.f : 1.f - std::pow(1.f - 1.f / s, dt * 60.f);
 
-                float dY  = (eY * alpha) / SafeG(C.gY);    // градусы поворота тела
-                float dFp = (eP * alpha) / SafeG(C.gP);    // приращение rotationX
+                float maxStep = Cfg::MaxDegPerSec * dt;
+                float wantY = std::clamp(eY * alpha, -maxStep, maxStep);
+                float wantP = std::clamp(eP * alpha, -maxStep, maxStep);
+
+                float dY  = wantY / SafeG(C.gY);    // градусы поворота тела
+                float dFp = wantP / SafeG(C.gP);    // приращение rotationX
                 if (!C.OkY()) dY  = std::clamp(dY,  -Cfg::UncalibStepYaw, Cfg::UncalibStepYaw);
                 if (!C.OkP()) dFp = std::clamp(dFp, -Cfg::UncalibStepPit, Cfg::UncalibStepPit);
 
@@ -398,8 +460,8 @@ namespace
         // aim::silent здесь не обрабатывается: для него нужен хук на выстрел, это отдельный шаг.
 
         std::snprintf(st, sizeof st,
-            "AIM pc=%d loc=%d cand=%d fov=%d hid=%d tgt=%d | gY=%.2f(%d) gP=%.2f(%d) | eY=%.1f eP=%.1f rx=%.1f %s",
-            W.nPc, W.nLocal, (int)W.cands.size(), inFov, hid, best ? 1 : 0,
+            "AIM pc=%d loc=%d cand=%d fov=%d hid=%d tgt=%d lock=%d | gY=%.2f(%d) gP=%.2f(%d) | eY=%.1f eP=%.1f rx=%.1f %s",
+            W.nPc, W.nLocal, (int)W.cands.size(), inFov, hid, best ? 1 : 0, (int)(W.lockedPc != 0),
             C.gY, C.nY, C.gP, C.nP, eY, eP, fp,
             C.NoResp() ? "NO RESPONSE" : (wrote ? "writing" : "idle"));
         Status(dl, st);
@@ -415,8 +477,13 @@ void aim::run()
     float screenHeight = ImGui::GetIO().DisplaySize.y;
     ImVec2 center(screenWidth / 2.0f, screenHeight / 2.0f);
 
-    if (aim::aimbot) AimbotFrame(draw, center);
-    else             C.ResetTrack();
+    if (aim::aimbot) {
+        AimbotFrame(draw, center);
+    } else {
+        C.ResetTrack();
+        W.lockedPc = 0;
+        W.lostSince = -1.0;
+    }
 
     if (aim::draw_fov) {
         draw->AddCircle(center, aim::fov_radius, ImGui::ColorConvertFloat4ToU32({
