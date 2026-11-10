@@ -52,6 +52,23 @@ namespace
         constexpr int HiddenAlways  = HiddenByRound | HiddenBySpectate;   // не про стены, блокирует всегда
     }
 
+    // ---- Углы и калибровка ----
+    struct Ang { float yaw, pitch; };   // градусы; yaw = atan2(x, z), pitch > 0 = вверх
+    struct Sample { double t; float cy, fp, ay, ap; };
+
+    struct Calib
+    {
+        float gY = 1.f, gP = -1.f;       // реальных градусов на единицу команды; начальные значения только стартовое допущение
+        int   nY = 0, nP = 0, badY = 0, badP = 0;
+        bool  have = false;
+        float lastY = 0.f, lastP = 0.f, unwY = 0.f, unwP = 0.f, cumY = 0.f;
+        std::vector<Sample> hist;
+        bool  OkY() const { return nY >= Cfg::CalibNeeded; }
+        bool  OkP() const { return nP >= Cfg::CalibNeeded; }
+        bool  NoResp() const { return badY >= 10 || badP >= 10; }
+        void  ResetTrack() { have = false; hist.clear(); cumY = 0.f; }
+    } C;
+
     struct Api
     {
         bool ready = false;
@@ -191,8 +208,9 @@ namespace
                 }
                 W.haveLocal = true;
                 W.localTeam = team;
-                if (W.lock != W.prevLock) {           // новый матч/респавн — старое состояние больше не актуально
-                    C.ResetTrack();
+                
+                // Сброс при смене локального PlayerLock (новый матч/респавн)
+                if (W.lock != W.prevLock) {
                     W.lockedPc = 0;
                     W.lostSince = -1.0;
                     W.prevLock = W.lock;
@@ -218,8 +236,6 @@ namespace
         return false;
     }
 
-    // Видимость по встроенному окклюдеру игры (PlayerCulling): за препятствием игра сама ставит
-    // бит HiddenByOcclusion в PlayerController._hiddenMask и прячет модель игрока.
     bool IsAlwaysHidden(const Cand& c)
     {
         int m = il::Read<int>(c.pc + Cfg::PC_HiddenMask);
@@ -266,9 +282,6 @@ namespace
         return true;
     }
 
-    // ---- Углы и калибровка ----
-    struct Ang { float yaw, pitch; };   // градусы; yaw = atan2(x, z), pitch > 0 = вверх
-
     bool FromDir(const V3& d, Ang& out)
     {
         float len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
@@ -278,23 +291,6 @@ namespace
         return true;
     }
     float Wrap(float a) { while (a > 180.f) a -= 360.f; while (a < -180.f) a += 360.f; return a; }
-
-    // cy: накопленный командованный поворот по яву (градусы), fp: значение rotationX,
-    // ay/ap: реальные углы камеры (ay без разрыва через 180).
-    struct Sample { double t; float cy, fp, ay, ap; };
-
-    struct Calib
-    {
-        float gY = 1.f, gP = -1.f;       // реальных градусов на единицу команды; начальные значения только стартовое допущение
-        int   nY = 0, nP = 0, badY = 0, badP = 0;
-        bool  have = false;
-        float lastY = 0.f, lastP = 0.f, unwY = 0.f, unwP = 0.f, cumY = 0.f;
-        std::vector<Sample> hist;
-        bool  OkY() const { return nY >= Cfg::CalibNeeded; }
-        bool  OkP() const { return nP >= Cfg::CalibNeeded; }
-        bool  NoResp() const { return badY >= 10 || badP >= 10; }
-        void  ResetTrack() { have = false; hist.clear(); cumY = 0.f; }
-    } C;
 
     void CalibUpdate(double now)
     {
@@ -375,20 +371,23 @@ namespace
         while (!C.hist.empty() && now - C.hist.front().t > 0.6) C.hist.erase(C.hist.begin());
         CalibUpdate(now);
 
+        // === ИСПРАВЛЕНИЕ: Объявляем переменные ДО лямбды ===
+        const Cand* best = nullptr; 
+        V3 bestPos{}; 
+        int inFov = 0, hid = 0;
+
         // Выбор цели: сначала пробуем удержать уже выбранную, чтобы не дёргаться на границе FOV.
         auto qualifies = [&](const Cand& c, ImVec2& s, float& d) -> bool {
             if (W.haveLocal && !W.localTeam.empty() && c.team == W.localTeam) return false;
             if (IsDead(c)) return false;
             if (IsAlwaysHidden(c)) return false;                                   // раунд ещё не идёт / спектейт — не про стены
-            if (!aim::aim_through_walls && IsOccluded(c)) hid++;
+            if (!aim::aim_through_walls && IsOccluded(c)) hid++;                   // теперь hid виден
             V3 p;
             if (!AimPoint(c, p)) return false;
             if (!W2S(cam, p, sx, sy, (float)sh, s)) return false;
             d = std::hypot(s.x - center.x, s.y - center.y);
             return true;
         };
-
-        const Cand* best = nullptr; V3 bestPos{}; int inFov = 0, hid = 0;
 
         if (W.lockedPc) {
             for (const Cand& c : W.cands) {
