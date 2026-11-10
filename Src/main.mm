@@ -12,8 +12,6 @@
 
 #include "Memory/KittyInclude.hpp"
 
-#include "Hooks/hooks.h"
-
 static bool   g_open = false;
 static CGRect g_btnRect, g_menuRect;
 static bool   g_checkbox = false;
@@ -121,7 +119,6 @@ static bool   g_tLeave = false;
 
     ImDrawList* drawList = ImGui::GetBackgroundDrawList();
 
-    hooks::tick();
     visuals::run();
     aim::run();
     rage::run();
@@ -343,5 +340,4 @@ static inline const char* IL2CPP_FRAMEWORK(const char* NAME) {
 
 __attribute__((constructor)) static void init(void) {
     tryInstall();
-    hooks::init();
 }
