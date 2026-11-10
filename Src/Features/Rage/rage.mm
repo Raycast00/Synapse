@@ -63,6 +63,9 @@ namespace off {
 
     constexpr uintptr_t pm_NoclipEnabled = 0x38; // public bool NoclipEnabled
     constexpr uintptr_t pm_NoclipSpeed   = 0x3C; // private float _noclipSpeed
+
+    constexpr uintptr_t gc_FriendlyFire = 0x20;   // private bool _friendlyFire
+    constexpr uintptr_t gc_RoundsToWin  = 0x94;   // <RoundsToWin>k__BackingField
 }
 
 struct Orig {
