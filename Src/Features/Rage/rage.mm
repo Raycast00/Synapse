@@ -33,6 +33,10 @@ namespace off {
     constexpr uintptr_t airInaccuracy   = 0x68;
     constexpr uintptr_t pelletSpread    = 0xA4;
     constexpr uintptr_t recoilParams    = 0x150;
+
+    constexpr uintptr_t arms_AccuracyMult     = 0x114;
+    constexpr uintptr_t arms_RecoilMult       = 0x110;
+    constexpr uintptr_t arms_AccuracyAdditive = 0x11C;
     // AirInaccuracy: 0x10..0x33 = stand/jump/land/ladder (Vector2) + jumpInitial
     constexpr uintptr_t airStart  = 0x10;
     constexpr int       airFloats = 9;
