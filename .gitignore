@@ -1,7 +1,0 @@
-# артефакты сборки
-dobby-build/
-Synapse.dylib
-*.dSYM/
-
-# macOS
-.DS_Store
