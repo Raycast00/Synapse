@@ -221,7 +221,7 @@ static void drawStatus(bool ilReady)
         uintptr_t mv   = ok(pc) ? Read<uintptr_t>(pc + off::pcMovement) : 0;
 
         std::snprintf(l1, sizeof l1,
-            "RAGE tog: ammo=%d rate=%d mbt=%d air=%d rec=%d spr=%d | pc=%d arms=%d mv=%d wpn=%d cam=%d",
+            "RAGE tog: ammo=%d rate=%d mbt=%d rec=%d spr=%d | pc=%d arms=%d mv=%d wpn=%d cam=%d",
             rage::infinity_ammo, rage::rapid_fire, rage::MBT, rage::no_recoil, rage::no_spread,
             ok(pc), ok(arms), ok(mv), (int)g_weapons.size(), ok(fpsCamera()));
 
