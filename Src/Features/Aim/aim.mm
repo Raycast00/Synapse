@@ -462,7 +462,7 @@ namespace
 
                 float maxStep = Cfg::MaxDegPerSec * dt;
                 float dY  = std::clamp(eY * alpha, -maxStep, maxStep);   // реальные градусы, Rotate их и ждёт
-                float dFp = std::clamp(eP * alpha, -maxStep, maxStep);   // rotationX тоже в градусах Эйлера
+                float dFp = -std::clamp(eP * alpha, -maxStep, maxStep);   // rotationX тоже в градусах Эйлера
 
                 if (std::isfinite(dY) && std::isfinite(dFp) && (std::fabs(eY) > 0.05f || std::fabs(eP) > 0.05f)) {
                     float x = 0.f, y = dY, z = 0.f;

@@ -196,24 +196,6 @@ static void applyMBT()
     Write<uint8_t>(mv + off::pm_IsFreezing, 0);
 }
 
-static void applyAirJump()
-{
-    uintptr_t pc = localPlayerController();
-    if (!ok(pc)) return;
-    uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement);
-    if (!ok(mv)) return;
-    Write<uint8_t>(mv + off::pm_IsGrounded, 1);
-}
-
-static void applySuperJump()
-{
-    uintptr_t pc = localPlayerController();
-    if (!ok(pc)) return;
-    uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement);
-    if (!ok(mv)) return;
-    Write<float>(mv + 0x20, rage::jump_strength);
-}
-
 static void applyNoFallDamage()
 {
     uintptr_t pc = localPlayerController();
@@ -223,58 +205,6 @@ static void applyNoFallDamage()
     
     Write<float>(mv + 0xB8, 0.0f);
     Write<float>(mv + 0xB4, 0.0f);
-}
-
-static void applyAutoWin()
-{
-    if (!rage::auto_bomb_win) return;
-
-    // 1. Получаем локального игрока и его Photon Player
-    uintptr_t pc = localPlayerController();
-    if (!ok(pc)) return;
-    uintptr_t photonPlayer = Read<uintptr_t>(pc + 0x90);
-    if (!ok(photonPlayer)) return;
-
-    // 2. Получаем твою команду ("T" или "CT")
-    static void* playerKlass = IL2CPP::Class("Photon.Realtime", "Player", "PhotonRealtime");
-    static void* getTeamMethod = IL2CPP::Method(playerKlass, "get_Team", 0);
-    void* myTeamString = IL2CPP::Invoke(getTeamMethod, (void*)photonPlayer, nullptr);
-    if (!IL2CPP::ValidPtr((uintptr_t)myTeamString)) return;
-
-    // Читаем строку из памяти (преобразуем System.String в std::string)
-    std::string teamName = "";
-    int32_t len = Read<int32_t>((uintptr_t)myTeamString + 0x10);
-    if (len > 0 && len < 10) {
-        for (int i = 0; i < len; i++) {
-            uint16_t c = Read<uint16_t>((uintptr_t)myTeamString + 0x14 + i * 2);
-            teamName += (char)c;
-        }
-    }
-
-    // 3. Определяем WinType в зависимости от команды
-    // 1 = BombExploison (Взрыв, для T)
-    // 2 = BombDefused (Дефьюз, для CT)
-    int winType = 1; 
-    if (teamName == "CT" || teamName == "CounterTerrorist") {
-        winType = 2; // Дефьюз
-    } else {
-        winType = 1; // Взрыв (T)
-    }
-
-    // 4. Получаем GameController
-    static void* gcKlass = IL2CPP::Class("", "GameController", "Assembly-CSharp");
-    static void* instanceField = IL2CPP::Field(gcKlass, "<Instance>k__BackingField"); // Проверь имя в dump.cs
-    uintptr_t gcInstance = IL2CPP::StaticField<uintptr_t>(instanceField);
-    if (!ok(gcInstance)) return;
-
-    // 5. Вызываем AddScore
-    // ⚠️ Замени DeathMatchController на актуальный режим (DuelsController, CompetitiveController и т.д.)
-    static void* modeKlass = IL2CPP::Class("", "DeathMatchController", "Assembly-CSharp");
-    static void* addScoreMethod = IL2CPP::Method(modeKlass, "AddScore", 2);
-    if (!addScoreMethod) return;
-
-    void* args[2] = { myTeamString, &winType };
-    IL2CPP::Invoke(addScoreMethod, (void*)gcInstance, args);
 }
 
 static void drawStatus(bool ilReady)
@@ -336,17 +266,5 @@ void rage::run()
     if (rage::rapid_fire) applyRapidFire();
     if (rage::perfect_accuracy) applyPerfectAccuracy();
     if (rage::MBT)           applyMBT();
-    if (rage::air_jump)      applyAirJump();
-    if (rage::super_jump)    applySuperJump();
     if (rage::no_fall_damage) applyNoFallDamage();
-
-    // Bomb
-    static bool last_auto_win = false;
-    if (rage::auto_bomb_win && !last_auto_win) {
-        applyAutoWin();
-        last_auto_win = true;
-    }
-    if (!rage::auto_bomb_win) {
-        last_auto_win = false;
-    }
 }

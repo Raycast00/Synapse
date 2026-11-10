@@ -167,6 +167,10 @@ static bool   g_tLeave = false;
                     ImGui::Combo("Box Type", &visuals::current_box_type, visuals::box_type, IM_ARRAYSIZE(visuals::box_type));
                 }
 
+                ImGui::Checkbox("Skeleton", &visuals::skeleton);
+                ImGui::SameLine();
+                ImGui::ColorEdit4("## Skeleton Color", visuals::skeleton_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+
                 ImGui::Checkbox("Health Bar", &visuals::healthBar);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## Health Bar Color", visuals::healthbar_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
@@ -222,7 +226,7 @@ static bool   g_tLeave = false;
                 ImGui::Checkbox("Draw FOV", &aim::draw_fov);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## FOV Color", aim::fov_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-                ImGui::SliderFloat("Field of View", &aim::fov_radius, 60.f, 180.f, "%.0f");
+                ImGui::SliderFloat("Field of View", &aim::fov_radius, 30.f, 180.f, "%.0f");
 
                 ImGui::SliderFloat("Smoothing", &aim::aimbot_smoothing, 0.f, 100.f, "%.0f%%");
 

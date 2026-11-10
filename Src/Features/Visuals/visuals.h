@@ -13,6 +13,9 @@ namespace visuals
     inline bool boxFill = false;
     inline float box_fill_color[4]{ 1.f, 1.f, 1.f, 0.25f };
 
+    inline bool skeleton = false;
+    inline float skeleton_color[4]{ 1.f, 1.f, 1.f, 0.5f };
+
     inline bool healthBar = false;
     inline float healthbar_color[4]{ 0.f, 1.0f, 0.f, 1.f };
 

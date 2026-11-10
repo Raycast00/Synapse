@@ -11,17 +11,14 @@ namespace rage
     inline bool perfect_accuracy = false;
     inline bool no_recoil = false;
     inline bool no_spread = false;
+    inline bool fast_defuse = false;
 
     // Player
     inline bool MBT = false;
-    inline bool air_jump = false;
-
-    inline bool super_jump = false;
-    inline float jump_strength = 200.f;
 
     inline bool no_fall_damage = false;
 
-    // Bomb
-    inline bool fast_defuse = false;
-    inline bool auto_bomb_win = false;
+    // Game
+    
+    inline bool auto_win = false;
 }
