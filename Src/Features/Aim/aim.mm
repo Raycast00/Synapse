@@ -1,6 +1,6 @@
-#include «aim.h»
-#include «imgui.h»
-#include «il2cpp/il2cpp.h»
+#include "aim.h"
+#include "imgui.h"
+#include "il2cpp/il2cpp.h"
 
 #include <algorithm>
 #include <cmath>
@@ -43,7 +43,7 @@ namespace
         constexpr float  MinDelta        = 0.30f;    // минимальное изменение для калибровочного сэмпла
         constexpr float  UncalibStepYaw  = 0.5f;     // макс. шаг по яву (градусы) до калибровки
         constexpr float  UncalibStepPit  = 0.25f;    // макс. шаг записи в rotationX до калибровки
-        constexpr int    CalibNeeded     = 5;        // сэмплов для «откалибровано»
+        constexpr int    CalibNeeded     = 5;        // сэмплов для "откалибровано"
 
         // Не откалибровано, подбирать в игре.
         constexpr float  KeepRadiusMul    = 1.5f;    // держим текущую цель, пока она внутри fov_radius*этот множитель
@@ -66,40 +66,39 @@ namespace
     {
         if (A.ready) return true;
         A.missing.clear();
-        const char* core = «UnityEngine.CoreModule»;
-        auto need = [&](void* p, const char* n) { if (!p) { A.missing += n; A.missing += ‘ ‘; } };
+        const char* core = "UnityEngine.CoreModule";
+        auto need = [&](void* p, const char* n) { if (!p) { A.missing += n; A.missing += ' '; } };
 
-        A.kPC     = il::Class(«», «PlayerController», «Assembly-CSharp»);
-        A.kSkel   = il::Class(«ScarletWork.Game», «PlayerSkeleton», «Assembly-CSharp»);
-        A.kPlayer = il::Class(«Photon.Realtime», «Player», «PhotonRealtime»);
+        A.kPC     = il::Class("", "PlayerController", "Assembly-CSharp");
+        A.kSkel   = il::Class("ScarletWork.Game", "PlayerSkeleton", "Assembly-CSharp");
+        A.kPlayer = il::Class("Photon.Realtime", "Player", "PhotonRealtime");
 
-        void* kComponent  = il::Class(«UnityEngine», «Component», core);
-        void* kGameObject = il::Class(«UnityEngine», «GameObject», core);
-        void* kTransform  = il::Class(«UnityEngine», «Transform», core);
-        void* kCamera     = il::Class(«UnityEngine», «Camera», core);
+        void* kComponent  = il::Class("UnityEngine", "Component", core);
+        void* kGameObject = il::Class("UnityEngine", "GameObject", core);
+        void* kTransform  = il::Class("UnityEngine", "Transform", core);
+        void* kCamera     = il::Class("UnityEngine", "Camera", core);
+        void* kScreen     = il::Class("UnityEngine", "Screen", core);
 
-        void* kScreen     = il::Class(«UnityEngine», «Screen», core);
+        A.mGetTransform      = il::Method(kComponent, "get_transform", 0);
+        A.mGoGetTransform    = il::Method(kGameObject, "get_transform", 0);
+        A.mGetCompInChildren = il::Method(kComponent, "GetComponentInChildren", 2);
+        A.mGetPos            = il::Method(kTransform, "get_position", 0);
+        A.mGetFwd            = il::Method(kTransform, "get_forward", 0);
+        A.mRotate4           = il::Method(kTransform, "Rotate", 4);      // Rotate(float x, float y, float z, Space)
+        A.mW2S               = il::Method(kCamera, "WorldToScreenPoint", 1);
+        A.mCamMain           = il::Method(kCamera, "get_main", 0);
+        A.mScreenW           = il::Method(kScreen, "get_width", 0);
+        A.mScreenH           = il::Method(kScreen, "get_height", 0);
+        A.mGetHeadBone       = il::Method(A.kSkel, "GetHeadBone", 0);    // опционально
+        A.mTeam              = il::Method(A.kPlayer, "get_Team", 0);     // опционально
+        A.mIsAlive           = il::Method(A.kPlayer, "get_IsAlive", 0);  // опционально
+        A.mHealth            = il::Method(A.kPC, "get_Health", 0);       // опционально
 
-        A.mGetTransform      = il::Method(kComponent, «get_transform», 0);
-        A.mGoGetTransform    = il::Method(kGameObject, «get_transform», 0);
-        A.mGetCompInChildren = il::Method(kComponent, «GetComponentInChildren», 2);
-        A.mGetPos            = il::Method(kTransform, «get_position», 0);
-        A.mGetFwd            = il::Method(kTransform, «get_forward», 0);
-        A.mRotate4           = il::Method(kTransform, «Rotate», 4);      // Rotate(float x, float y, float z, Space)
-        A.mW2S               = il::Method(kCamera, «WorldToScreenPoint», 1);
-        A.mCamMain           = il::Method(kCamera, «get_main», 0);
-        A.mScreenW           = il::Method(kScreen, «get_width», 0);
-        A.mScreenH           = il::Method(kScreen, «get_height», 0);
-        A.mGetHeadBone       = il::Method(A.kSkel, «GetHeadBone», 0);    // опционально
-        A.mTeam              = il::Method(A.kPlayer, «get_Team», 0);     // опционально
-        A.mIsAlive           = il::Method(A.kPlayer, «get_IsAlive», 0);  // опционально
-        A.mHealth            = il::Method(A.kPC, «get_Health», 0);       // опционально
-
-        need(A.kPC, «PlayerController»); need(A.kSkel, «PlayerSkeleton»);
-        need(A.mGetTransform, «Component.get_transform»); need(A.mGoGetTransform, «GameObject.get_transform»);
-        need(A.mGetCompInChildren, «GetComponentInChildren/2»); need(A.mGetPos, «get_position»);
-        need(A.mGetFwd, «get_forward»); need(A.mRotate4, «Transform.Rotate/4»); need(A.mW2S, «WorldToScreenPoint»);
-        need(A.mScreenW, «get_width»); need(A.mScreenH, «get_height»);
+        need(A.kPC, "PlayerController"); need(A.kSkel, "PlayerSkeleton");
+        need(A.mGetTransform, "Component.get_transform"); need(A.mGoGetTransform, "GameObject.get_transform");
+        need(A.mGetCompInChildren, "GetComponentInChildren/2"); need(A.mGetPos, "get_position");
+        need(A.mGetFwd, "get_forward"); need(A.mRotate4, "Transform.Rotate/4"); need(A.mW2S, "WorldToScreenPoint");
+        need(A.mScreenW, "get_width"); need(A.mScreenH, "get_height");
 
         A.ready = A.missing.empty();
         return A.ready;
@@ -114,7 +113,7 @@ namespace
         std::string out;
         for (int32_t i = 0; i < len; i++) {
             uint16_t c = il::Read<uint16_t>(p + 0x14 + i * 2);
-            out += (c < 0x80) ? (char)c : ‘?’;
+            out += (c < 0x80) ? (char)c : '?';
         }
         return out;
     }
@@ -149,7 +148,7 @@ namespace
         return PosOfTransform(tr, out);
     }
 
-    // -— Цели -—
+    // ---- Цели ----
     struct Cand { uintptr_t pc = 0, player = 0, skeleton = 0; std::string team; };
 
     struct World
@@ -176,7 +175,6 @@ namespace
         for (uintptr_t pc : il::FindObjectsOfType(A.kPC)) {
             W.nPc++;
             uintptr_t player = il::Read<uintptr_t>(pc + Cfg::PC_Player);
-
             if (!il::ValidPtr(player)) continue;
 
             std::string team = Str(il::Invoke(A.mTeam, (void*)player, nullptr));
@@ -249,7 +247,7 @@ namespace
 
         int mode = aim::current_aimbot_hitbox;
         bool wantHead = (mode == 0) || (mode == 2 && g_rollHead);
-        return wantHead ? (head()  chest()) : (chest()  head());
+        return wantHead ? (head() || chest()) : (chest() || head());
     }
 
     bool W2S(uintptr_t cam, const V3& w, float sx, float sy, float screenH, ImVec2& out)
@@ -262,7 +260,7 @@ namespace
         return true;
     }
 
-    // -— Углы и калибровка -—
+    // ---- Углы и калибровка ----
     struct Ang { float yaw, pitch; };   // градусы; yaw = atan2(x, z), pitch > 0 = вверх
 
     bool FromDir(const V3& d, Ang& out)
@@ -276,7 +274,6 @@ namespace
     float Wrap(float a) { while (a > 180.f) a -= 360.f; while (a < -180.f) a += 360.f; return a; }
 
     // cy: накопленный командованный поворот по яву (градусы), fp: значение rotationX,
-
     // ay/ap: реальные углы камеры (ay без разрыва через 180).
     struct Sample { double t; float cy, fp, ay, ap; };
 
@@ -312,7 +309,7 @@ namespace
             if (std::fabs(s) < 0.02f) {
                 if (bad == 0) badSince = now;
                 bad++;
-                // Самовосстановление: не держим «нет ответа» вечно, если корреляция так и не вернулась,
+                // Самовосстановление: не держим "нет ответа" вечно, если корреляция так и не вернулась,
                 // например из-за временной не наша камеры (конец раунда, киллкам и т.п.).
                 if (badSince > 0.0 && now - badSince > Cfg::BadResetTimeout) { bad = 0; badSince = -1.0; }
                 return;
@@ -338,7 +335,7 @@ namespace
     void AimbotFrame(ImDrawList* dl, ImVec2 center)
     {
         char st[320];
-        if (!ResolveApi()) { std::snprintf(st, sizeof st, «AIM: missing %s», A.missing.c_str()); Status(dl, st); return; }
+        if (!ResolveApi()) { std::snprintf(st, sizeof st, "AIM: missing %s", A.missing.c_str()); Status(dl, st); return; }
 
         double now = ImGui::GetTime();
         if (W.last < 0.0 || now - W.last >= Cfg::RefreshInterval) {
@@ -358,8 +355,8 @@ namespace
             void* c = il::Invoke(A.mCamMain, nullptr, nullptr);
             if (il::ValidPtr((uintptr_t)c)) cam = (uintptr_t)c;
         }
-        if (!il::ValidPtr(cam)  !il::ValidPtr(W.lock)  !il::ValidPtr(W.body)) {
-            std::snprintf(st, sizeof st, «AIM: no local view (pc=%d loc=%d cam=%d lock=%d body=%d)»,
+        if (!il::ValidPtr(cam) || !il::ValidPtr(W.lock) || !il::ValidPtr(W.body)) {
+            std::snprintf(st, sizeof st, "AIM: no local view (pc=%d loc=%d cam=%d lock=%d body=%d)",
                           W.nPc, W.nLocal, il::ValidPtr(cam), il::ValidPtr(W.lock), il::ValidPtr(W.body));
             Status(dl, st);
             C.ResetTrack();
@@ -370,7 +367,6 @@ namespace
         int sw = il::InvokeBoxed<int>(A.mScreenW, nullptr, nullptr);
         int sh = il::InvokeBoxed<int>(A.mScreenH, nullptr, nullptr);
         if (sw <= 0 || sh <= 0) return;
-
         ImVec2 disp = ImGui::GetIO().DisplaySize;
         float sx = disp.x / (float)sw, sy = disp.y / (float)sh;
 
@@ -381,7 +377,7 @@ namespace
         V3 eye = il::InvokeBoxed<V3>(A.mGetPos, camTr, nullptr);
         V3 fwd = il::InvokeBoxed<V3>(A.mGetFwd, camTr, nullptr);
         Ang cur{};
-        if (!Finite(eye)  !Finite(fwd)  !FromDir(fwd, cur)) return;
+        if (!Finite(eye) || !Finite(fwd) || !FromDir(fwd, cur)) return;
 
         float fp = il::Read<float>(W.lock + Cfg::PL_RotationX);
         if (!std::isfinite(fp)) return;
@@ -461,7 +457,6 @@ namespace
                 float wantP = std::clamp(eP * alpha, -maxStep, maxStep);
 
                 float dY  = wantY / SafeG(C.gY);    // градусы поворота тела
-
                 float dFp = wantP / SafeG(C.gP);    // приращение rotationX
                 if (!C.OkY()) dY  = std::clamp(dY,  -Cfg::UncalibStepYaw, Cfg::UncalibStepYaw);
                 if (!C.OkP()) dFp = std::clamp(dFp, -Cfg::UncalibStepPit, Cfg::UncalibStepPit);
@@ -480,10 +475,10 @@ namespace
         // aim::silent здесь не обрабатывается: для него нужен хук на выстрел, это отдельный шаг.
 
         std::snprintf(st, sizeof st,
-            «AIM pc=%d loc=%d cand=%d fov=%d hid=%d tgt=%d lock=%d | gY=%.2f(%d) gP=%.2f(%d) bad=%d/%d | eY=%.1f eP=%.1f rx=%.1f %s»,
+            "AIM pc=%d loc=%d cand=%d fov=%d hid=%d tgt=%d lock=%d | gY=%.2f(%d) gP=%.2f(%d) bad=%d/%d | eY=%.1f eP=%.1f rx=%.1f %s",
             W.nPc, W.nLocal, (int)W.cands.size(), inFov, hid, best ? 1 : 0, (int)(W.lockedPc != 0),
             C.gY, C.nY, C.gP, C.nP, C.badY, C.badP, eY, eP, fp,
-            C.NoResp() ? «NO RESPONSE» : (wrote ? «writing» : «idle»));
+            C.NoResp() ? "NO RESPONSE" : (wrote ? "writing" : "idle"));
         Status(dl, st);
     }
 }
@@ -512,7 +507,7 @@ void aim::run()
     }
 
     if (aim::anti_aim) {
-        static void* cmcClass = IL2CPP::Class(«ScarletWork.Game.Camera», «CameraMovementController»);
+        static void* cmcClass = IL2CPP::Class("ScarletWork.Game.Camera", "CameraMovementController");
         std::vector<uintptr_t> controllers = IL2CPP::FindObjectsOfType(cmcClass);
         if (!controllers.empty()) {
             uintptr_t cmc = controllers[0];
