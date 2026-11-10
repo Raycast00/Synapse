@@ -16,7 +16,6 @@ namespace rage
     // Player
     inline bool MBT = false;
     inline bool no_fall_damage = false;
-    inline bool friendly_fire = false;
 
     // Game
     inline bool auto_win = false;
