@@ -34,6 +34,7 @@ namespace
         constexpr uintptr_t PL_RotationX    = 0x40;  // PlayerLock.rotationX (public float, питч, градусы Эйлера)
 
         constexpr uintptr_t Player_IsLocal  = 0x1C;  // Photon.Realtime.Player.IsLocal
+        constexpr uintptr_t Skel_Body = 0x60;
         constexpr uintptr_t Skel_HeadBone   = 0xC0;  // PlayerSkeleton._headBone (предположительно Rigidbody), запасной вариант
         constexpr uintptr_t Skel_ChestBone  = 0xC8;  // PlayerSkeleton._chestBone (предположительно Rigidbody)
         constexpr uintptr_t Skel_PelvisBone = 0xD0;  // PlayerSkeleton._pelvisBone (предположительно Rigidbody), запасной вариант
@@ -68,6 +69,7 @@ namespace
         void *mGetTransform{}, *mGoGetTransform{}, *mGetCompInChildren{}, *mGetPos{}, *mGetFwd{}, *mRotate4{};
         void *mW2S{}, *mCamMain{}, *mScreenW{}, *mScreenH{}, *mGetHeadBone{};
         void *mTeam{}, *mIsAlive{}, *mHealth{}, *mLookXLimit{}, *mGetVelocity{};
+        void *kSMR{}, *mGetBones{};
     } A;
 
     bool ResolveApi()
@@ -82,6 +84,8 @@ namespace
         A.kPlayerLock = il::Class("ScarletWork.Game", "PlayerLock", "Assembly-CSharp");
         A.kPlayer     = il::Class("Photon.Realtime", "Player", "PhotonRealtime");
         A.kRigidbody  = il::Class("UnityEngine", "Rigidbody", "UnityEngine.PhysicsModule");   // опционально, для prediction
+        A.kSMR      = il::Class("UnityEngine", "SkinnedMeshRenderer", core);
+        A.mGetBones = il::Method(A.kSMR, "get_bones", 0);   // опционально
 
         void* kComponent  = il::Class("UnityEngine", "Component", core);
         void* kGameObject = il::Class("UnityEngine", "GameObject", core);
@@ -180,7 +184,7 @@ namespace
     }
 
     // ---- Цели ----
-    struct Cand { uintptr_t pc = 0, player = 0, skeleton = 0; std::string team; };
+    struct Cand { uintptr_t pc = 0, player = 0, skeleton = 0, headBone = 0; std::string team; };
 
     struct World
     {
@@ -231,8 +235,29 @@ namespace
             void* a[2] = { il::Type(A.kSkel), &inc };
             uintptr_t sk = (uintptr_t)il::Invoke(A.mGetCompInChildren, (void*)pc, a);
             if (!il::ValidPtr(sk)) { W.nNoSkel++; continue; }
-            W.cands.push_back({ pc, player, sk, team });
+            uintptr_t body = il::Read<uintptr_t>(sk + Cfg::Skel_Body);
+            uintptr_t hb = PickHeadBone(body);
+            W.cands.push_back({ pc, player, sk, hb, team });
         }
+    }
+
+    uintptr_t PickHeadBone(uintptr_t body)
+    {
+        if (!A.mGetBones || !il::ValidPtr(body)) return 0;
+        uintptr_t arr = (uintptr_t)il::Invoke(A.mGetBones, (void*)body, nullptr);
+        if (!il::ValidPtr(arr)) return 0;
+        uint64_t len = il::Read<uint64_t>(arr + 0x18);     // Il2CppArray: max_length @0x18, data @0x20
+        if (len == 0 || len > 512) return 0;
+
+        uintptr_t best = 0; float bestY = -1e9f;
+        for (uint64_t i = 0; i < len; i++) {
+            uintptr_t t = il::Read<uintptr_t>(arr + 0x20 + i * 8);
+            if (!il::ValidPtr(t)) continue;
+            V3 p;
+            if (!PosOfTransform((void*)t, p)) continue;
+            if (p.y > bestY) { bestY = p.y; best = t; }
+        }
+        return best;
     }
 
     bool IsDead(const Cand& c)
@@ -264,6 +289,7 @@ namespace
     {
         bone = nullptr;
         auto head = [&]() -> bool {
+            if (il::ValidPtr(c.headBone) && PosOfTransform((void*)c.headBone, out)) { bone = (void*)c.headBone; return true; }
             if (A.mGetHeadBone) {
                 void* t = il::Invoke(A.mGetHeadBone, (void*)c.skeleton, nullptr);
                 if (PosOfTransform(t, out)) { bone = t; return true; }
