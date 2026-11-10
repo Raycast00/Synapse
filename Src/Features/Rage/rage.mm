@@ -173,20 +173,6 @@ static void applyRapidFire()
     }
 }
 
-static void applyPerfectAccuracy()
-{
-    uintptr_t pc = localPlayerController();
-    if (!ok(pc)) return;
-    uintptr_t arms = Read<uintptr_t>(pc + off::pcArms);
-    if (!ok(arms)) return;
-
-    if (rage::perfect_accuracy) {
-        Write<float>(arms + off::arms_AccuracyMult, 0.0f);
-        Write<float>(arms + off::arms_RecoilMult, 0.0f);
-        Write<float>(arms + off::arms_AccuracyAdditive, 0.0f);
-    }
-}
-
 static void applyMBT()
 {
     uintptr_t pc = localPlayerController();
@@ -264,7 +250,6 @@ void rage::run()
 
     if (rage::infinity_ammo) applyInfinityAmmo();
     if (rage::rapid_fire) applyRapidFire();
-    if (rage::perfect_accuracy) applyPerfectAccuracy();
     if (rage::MBT)           applyMBT();
     if (rage::no_fall_damage) applyNoFallDamage();
 }
