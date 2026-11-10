@@ -208,6 +208,60 @@ static void applyFriendlyFire()
     Write<uint8_t>(gc + off::gc_FriendlyFire, 1);
 }
 
+static void applyAutoWin()
+{
+    if (!rage::auto_win) return;
+
+    // 1. GameController (Singleton)
+    static void* gcClass = IL2CPP::Class("ScarletWork.Game", "GameController", "Assembly-CSharp");
+    if (!gcClass) return;
+    static void* instanceField = IL2CPP::Field(gcClass, "<Instance>k__BackingField");
+    if (!instanceField) instanceField = IL2CPP::Field(gcClass, "Instance");
+    uintptr_t gc = IL2CPP::StaticField<uintptr_t>(instanceField);
+    if (!ok(gc)) return;
+
+    // 2. RoundsToWin = 1 (чтобы матч закончился после первого очка)
+    Write<int>(gc + off::gc_RoundsToWin, 1);
+
+    // 3. Получаем свою команду
+    uintptr_t pc = localPlayerController();
+    if (!ok(pc)) return;
+    uintptr_t player = Read<uintptr_t>(pc + 0x90); // PlayerController._player
+    if (!ok(player)) return;
+
+    static void* photonPlayerClass = IL2CPP::Class("Photon.Realtime", "Player", "PhotonRealtime");
+    static void* getTeamMethod = IL2CPP::Method(photonPlayerClass, "get_Team", 0);
+    void* myTeam = IL2CPP::Invoke(getTeamMethod, (void*)player, nullptr);
+    if (!IL2CPP::ValidPtr((uintptr_t)myTeam)) return;
+
+    // 4. Читаем команду как строку
+    std::string teamStr;
+    int32_t len = Read<int32_t>((uintptr_t)myTeam + 0x10);
+    if (len > 0 && len < 10)
+        for (int i = 0; i < len; i++)
+            teamStr += (char)Read<uint16_t>((uintptr_t)myTeam + 0x14 + i * 2);
+
+    // 5. Определяем WinType
+    int winType = 0; // MostPlayersKilled
+    if (teamStr == "TR" || teamStr == "T")   winType = 1;  // BombExploison
+    else if (teamStr == "CT")                 winType = 2;  // BombDefused
+
+    // 6. Ищем AddScore в конкретном контроллере режима
+    void* addScoreMethod = nullptr;
+    const char* controllers[] = { "DeathMatchController", "DuelsController", "OnlyAwpController" };
+    for (const char* name : controllers) {
+        void* ctrlClass = IL2CPP::Class("ScarletWork.Game", name, "Assembly-CSharp");
+        if (!ctrlClass) continue;
+        addScoreMethod = IL2CPP::Method(ctrlClass, "AddScore", 2);
+        if (addScoreMethod) break;
+    }
+    if (!addScoreMethod) return;
+
+    // 7. AddScore(team, winType)
+    void* args[2] = { myTeam, &winType };
+    IL2CPP::Invoke(addScoreMethod, (void*)gc, args);
+}
+
 static void drawStatus(bool ilReady)
 {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
@@ -261,11 +315,18 @@ void rage::run()
             pending = false;
         }
     }
-    
+
     if (rage::no_recoil) applyCameraRecoil();
     if (rage::infinity_ammo) applyInfinityAmmo();
     if (rage::rapid_fire) applyRapidFire();
     if (rage::MBT)           applyMBT();
     if (rage::no_fall_damage) applyNoFallDamage();
     if (rage::friendly_fire) applyFriendlyFire();
+
+    static bool g_lastAutoWin = false;
+    if (rage::auto_win && !g_lastAutoWin) {
+        applyAutoWin();
+        g_lastAutoWin = true;
+    }
+    if (!rage::auto_win) g_lastAutoWin = false;
 }
