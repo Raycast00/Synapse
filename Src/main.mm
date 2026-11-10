@@ -261,7 +261,7 @@ static bool   g_tLeave = false;
                 ImGui::SeparatorText("Bomb");
 
                 ImGui::Checkbox("Fast Defuse", &rage::fast_defuse);
-                ImGui::Checkbox("Auto Bomb Win", &rage::auto_bomb_win);
+                ImGui::Checkbox("Auto Win", &rage::auto_win);
 
                 ImGui::EndTabItem();
             }
