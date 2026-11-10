@@ -203,6 +203,25 @@ namespace
         float  lastCmdY = 0.f;         // сколько реальных градусов по яву мы сами скомандовали прошлым кадром
     } W;
 
+    uintptr_t PickHeadBone(uintptr_t body)
+    {
+        if (!A.mGetBones || !il::ValidPtr(body)) return 0;
+        uintptr_t arr = (uintptr_t)il::Invoke(A.mGetBones, (void*)body, nullptr);
+        if (!il::ValidPtr(arr)) return 0;
+        uint64_t len = il::Read<uint64_t>(arr + 0x18);     // Il2CppArray: max_length @0x18, data @0x20
+        if (len == 0 || len > 512) return 0;
+
+        uintptr_t best = 0; float bestY = -1e9f;
+        for (uint64_t i = 0; i < len; i++) {
+            uintptr_t t = il::Read<uintptr_t>(arr + 0x20 + i * 8);
+            if (!il::ValidPtr(t)) continue;
+            V3 p;
+            if (!PosOfTransform((void*)t, p)) continue;
+            if (p.y > bestY) { bestY = p.y; best = t; }
+        }
+        return best;
+    }
+
     void Refresh()
     {
         W.cands.clear();
@@ -239,25 +258,6 @@ namespace
             uintptr_t hb = PickHeadBone(body);
             W.cands.push_back({ pc, player, sk, hb, team });
         }
-    }
-
-    uintptr_t PickHeadBone(uintptr_t body)
-    {
-        if (!A.mGetBones || !il::ValidPtr(body)) return 0;
-        uintptr_t arr = (uintptr_t)il::Invoke(A.mGetBones, (void*)body, nullptr);
-        if (!il::ValidPtr(arr)) return 0;
-        uint64_t len = il::Read<uint64_t>(arr + 0x18);     // Il2CppArray: max_length @0x18, data @0x20
-        if (len == 0 || len > 512) return 0;
-
-        uintptr_t best = 0; float bestY = -1e9f;
-        for (uint64_t i = 0; i < len; i++) {
-            uintptr_t t = il::Read<uintptr_t>(arr + 0x20 + i * 8);
-            if (!il::ValidPtr(t)) continue;
-            V3 p;
-            if (!PosOfTransform((void*)t, p)) continue;
-            if (p.y > bestY) { bestY = p.y; best = t; }
-        }
-        return best;
     }
 
     bool IsDead(const Cand& c)
