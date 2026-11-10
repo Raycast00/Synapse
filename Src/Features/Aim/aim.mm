@@ -27,7 +27,6 @@ namespace
         constexpr uintptr_t PC_Player       = 0x90;  // PlayerController._player
         constexpr uintptr_t PC_IsDeath      = 0xA8;  // PlayerController._isDeath
         constexpr uintptr_t PC_HiddenMask   = 0xC4;  // PlayerController._hiddenMask
-        constexpr int HiddenByRound = 1, HiddenBySpectate = 2, HiddenByOcclusion = 4;   // const в PlayerController
 
         constexpr uintptr_t PL_PlayerBody   = 0x20;  // PlayerLock._playerBody (GameObject)
         constexpr uintptr_t PL_RotationX    = 0x40;  // PlayerLock.rotationX (public float, питч)
@@ -416,7 +415,7 @@ namespace
             if (c.pc == W.lockedPc) continue;
             ImVec2 s; float d;
             if (!qualifies(c, s, d)) continue;
-            if (!aim::aim_through_walls && !IsVisible(c)) hid++;
+            if (!aim::aim_through_walls && IsOccluded(c)) hid++;
             if (d < aim::fov_radius) inFov++;
             if (!best && d < aim::fov_radius) {
                 V3 p; AimPoint(c, p);
