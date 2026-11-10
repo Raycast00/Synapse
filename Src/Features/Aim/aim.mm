@@ -168,6 +168,7 @@ namespace
 
     void Refresh()
     {
+        uintptr_t prevLock = 0;
         W.cands.clear();
         W.camera = W.lock = W.body = 0; W.haveLocal = false; W.localTeam.clear();
         W.nPc = W.nLocal = W.nNoSkel = 0;
