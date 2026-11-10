@@ -283,5 +283,4 @@ void rage::run()
     if (rage::air_jump)      applyAirJump();
     if (rage::super_jump)    applySuperJump();
     if (rage::no_fall_damage) applyNoFallDamage();
-    if (rage::godmode)       applyGodmode();
 }
