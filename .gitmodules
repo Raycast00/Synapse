@@ -1,3 +1,4 @@
 [submodule "Src/Dobby"]
 	path = Src/Dobby
 	url = https://github.com/jmpews/Dobby.git
+	branch = master
