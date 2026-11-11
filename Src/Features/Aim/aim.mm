@@ -4,11 +4,14 @@
 #include "Dobby/include/dobby.h"
 
 #import <Foundation/Foundation.h>
+#include <mach/mach.h>
+#include <mach/vm_map.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -42,20 +45,14 @@ namespace
         constexpr uintptr_t Skel_PelvisBone = 0xD0;
 
         constexpr double RefreshInterval = 0.25;
-
         constexpr float  KeepRadiusMul     = 1.5f;
         constexpr double LoseGraceSec      = 0.15;
         constexpr float  MaxDegPerSec      = 220.f;
         constexpr float  DefaultPitchLimit = 80.f;
-
         constexpr float  OverrideYawDegPerFrame = 12.f;
         constexpr double OverrideHoldSec        = 0.25;
-
         constexpr float  PredictLeadSec  = 0.12f;
         constexpr float  MaxSaneSpeed    = 15.f;
-
-        constexpr double CalibWindow   = 0.20;
-        constexpr float  MinDelta      = 0.30f;
     }
 
     struct Api
@@ -108,8 +105,6 @@ namespace
         A.mHealth            = il::Method(A.kPC, "get_Health", 0);
         A.mLookXLimit        = il::Method(A.kPlayerLock, "get_LookXLimit", 0);
         A.mGetVelocity       = il::Method(A.kRigidbody, "get_velocity", 0);
-
-        // Silent Aim: ArmsController.FireRay(Vector3 camPos, Vector3 forward, float distance)
         A.mFireRay           = il::Method(A.kArms, "FireRay", 3);
 
         need(A.kPC, "PlayerController"); need(A.kSkel, "PlayerSkeleton"); need(A.kPlayerLock, "PlayerLock");
@@ -172,7 +167,6 @@ namespace
         void* tr = il::Invoke(A.mGetTransform, comp, nullptr);
         return PosOfTransform(tr, out);
     }
-
     bool VelocityOfRigidbody(void* obj, V3& out)
     {
         if (!A.mGetVelocity || !A.kRigidbody || !il::ValidPtr((uintptr_t)obj)) return false;
@@ -194,11 +188,9 @@ namespace
         std::string localTeam;
         double last = -1.0;
         int nPc = 0, nLocal = 0, nNoSkel = 0;
-
         uintptr_t lockedPc = 0;
         double    lostSince = -1.0;
         uintptr_t prevLock = 0;
-
         double overrideUntil = -1.0;
         float  lastCmdY = 0.f;
     } W;
@@ -210,7 +202,6 @@ namespace
         if (!il::ValidPtr(arr)) return 0;
         uint64_t len = il::Read<uint64_t>(arr + 0x18);
         if (len == 0 || len > 512) return 0;
-
         uintptr_t best = 0; float bestY = -1e9f;
         for (uint64_t i = 0; i < len; i++) {
             uintptr_t t = il::Read<uintptr_t>(arr + 0x20 + i * 8);
@@ -232,7 +223,6 @@ namespace
             W.nPc++;
             uintptr_t player = il::Read<uintptr_t>(pc + Cfg::PC_Player);
             if (!il::ValidPtr(player)) continue;
-
             std::string team = Str(il::Invoke(A.mTeam, (void*)player, nullptr));
 
             if (il::Read<uint8_t>(player + Cfg::Player_IsLocal)) {
@@ -304,7 +294,6 @@ namespace
             if (il::ValidPtr(rb) && PosOfComponent((void*)rb, out)) { bone = (void*)rb; return true; }
             return false;
         };
-
         int mode = aim::current_aimbot_hitbox;
         bool wantHead = (mode == 0) || (mode == 2 && g_rollHead);
         return wantHead ? (head() || chest()) : (chest() || head());
@@ -321,7 +310,6 @@ namespace
     }
 
     struct Ang { float yaw, pitch; };
-
     bool FromDir(const V3& d, Ang& out)
     {
         float len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
@@ -332,16 +320,10 @@ namespace
     }
     float Wrap(float a) { while (a > 180.f) a -= 360.f; while (a < -180.f) a += 360.f; return a; }
 
-    struct Diag
-    {
-        float lastY = 0.f, lastP = 0.f;
-        bool  have = false;
-        float corrY = 0.f, corrP = 0.f;
-        void  Reset() { have = false; }
-    } D;
+    struct Diag { float lastY = 0.f, lastP = 0.f; bool have = false; float corrY = 0.f; void Reset() { have = false; } } D;
 
     // ============================================================
-    //  SILENT AIM
+    //  SILENT AIM — с защитой от partial hook
     // ============================================================
     using FireRay_t = void(*)(void* __this, V3 camPos, V3 forward, float distance);
     static FireRay_t g_orig_FireRay = nullptr;
@@ -351,6 +333,19 @@ namespace
 
     static void hook_FireRay(void* __this, V3 camPos, V3 forward, float distance)
     {
+        static bool logged = false;
+        if (!logged) {
+            logged = true;
+            NSLog(@"[silent] FireRay CALLED: this=%p camPos=(%.1f,%.1f,%.1f) fwd=(%.2f,%.2f,%.2f) dist=%.1f",
+                  __this, camPos.x, camPos.y, camPos.z, forward.x, forward.y, forward.z, distance);
+        }
+
+        // КРИТИЧЕСКИ ВАЖНО: если оригинал не сохранился — НЕ вызываем (иначе null deref → краш)
+        if (!g_orig_FireRay) {
+            NSLog(@"[silent] FireRay called but orig is NULL — skipping (bug in hook install)");
+            return;
+        }
+
         if (aim::silent && g_hasSilentTarget) {
             V3 dir = {
                 g_silentTarget.x - camPos.x,
@@ -364,7 +359,24 @@ namespace
                 forward.z = dir.z / len;
             }
         }
-        if (g_orig_FireRay) g_orig_FireRay(__this, camPos, forward, distance);
+
+        g_orig_FireRay(__this, camPos, forward, distance);
+    }
+
+    // Make page writable (iOS-safe)
+    static bool MakeWritable(void* addr, size_t size) {
+        vm_address_t page = (vm_address_t)addr & ~0xFFFULL;
+        vm_size_t   len  = ((vm_address_t)addr + size - page + 0xFFF) & ~0xFFFULL;
+        kern_return_t kr = vm_protect(mach_task_self(), page, len, false,
+                                       VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+        return kr == KERN_SUCCESS;
+    }
+    static bool RestoreProt(void* addr, size_t size) {
+        vm_address_t page = (vm_address_t)addr & ~0xFFFULL;
+        vm_size_t   len  = ((vm_address_t)addr + size - page + 0xFFF) & ~0xFFFULL;
+        kern_return_t kr = vm_protect(mach_task_self(), page, len, false,
+                                       VM_PROT_READ | VM_PROT_EXECUTE);
+        return kr == KERN_SUCCESS;
     }
 
     static void SetupSilentHook()
@@ -372,23 +384,46 @@ namespace
         if (g_hooksInstalled) return;
 
         if (!A.mFireRay) {
-            NSLog(@"[silent] FireRay method not resolved");
+            NSLog(@"[silent] FireRay method NOT resolved");
             return;
         }
 
         void* codeAddr = *(void**)A.mFireRay;
         if (!codeAddr) {
-            NSLog(@"[silent] FireRay methodPointer is null");
+            NSLog(@"[silent] FireRay methodPointer is NULL");
             return;
         }
 
+        // Логируем первые 4 инструкции — чтобы понять, что там
+        uint32_t i0 = *(uint32_t*)codeAddr;
+        uint32_t i1 = *((uint32_t*)codeAddr + 1);
+        uint32_t i2 = *((uint32_t*)codeAddr + 2);
+        uint32_t i3 = *((uint32_t*)codeAddr + 3);
+        NSLog(@"[silent] FireRay code=%p insn=%08X %08X %08X %08X", codeAddr, i0, i1, i2, i3);
+
+        // Бэкап 16 байт (4 инструкции)
+        uint8_t backup[16];
+        memcpy(backup, codeAddr, 16);
+
+        // Пробуем поставить хук
         int rc = DobbyHook(codeAddr, (void*)hook_FireRay, (void**)&g_orig_FireRay);
-        if (rc != 0) {
-            NSLog(@"[silent] DobbyHook failed rc=%d", rc);
+
+        if (rc != 0 || !g_orig_FireRay) {
+            NSLog(@"[silent] DobbyHook FAILED rc=%d orig=%p — restoring", rc, (void*)g_orig_FireRay);
+
+            // Откат: восстановить 16 байт
+            if (MakeWritable(codeAddr, 16)) {
+                memcpy(codeAddr, backup, 16);
+                __builtin___clear_cache((char*)codeAddr, (char*)codeAddr + 16);
+                RestoreProt(codeAddr, 16);
+            }
+
+            g_orig_FireRay = nullptr;
+            g_hooksInstalled = false;
             return;
         }
 
-        NSLog(@"[silent] Hooked FireRay @ %p", codeAddr);
+        NSLog(@"[silent] Hooked FireRay @ %p → orig=%p", codeAddr, (void*)g_orig_FireRay);
         g_hooksInstalled = true;
     }
 
@@ -437,44 +472,35 @@ namespace
 
             V3 p; void* bone;
             if (!AimPoint(c, p, bone)) continue;
-
             ImVec2 s;
             if (!W2S(cam, p, sx, sy, (float)sh, s)) continue;
-
             float d = std::hypot(s.x - center.x, s.y - center.y);
             if (d > aim::fov_radius) continue;
 
-            if (d < bestD) {
-                bestD = d;
-                best = &c;
-                bestPos = p;
-            }
+            if (d < bestD) { bestD = d; best = &c; bestPos = p; }
         }
 
         if (best) {
             g_silentTarget = bestPos;
             g_hasSilentTarget = true;
-
             ImVec2 s;
-            if (W2S(cam, bestPos, sx, sy, (float)sh, s)) {
+            if (W2S(cam, bestPos, sx, sy, (float)sh, s))
                 dl->AddCircle(s, 6.0f, IM_COL32(255, 60, 60, 255), 12, 1.5f);
-            }
         }
 
         if (kStatus) {
-            char st[160];
+            char st[180];
             std::snprintf(st, sizeof st,
-                "SILENT tgt=%d cand=%d hooked=%d",
-                g_hasSilentTarget ? 1 : 0,
-                (int)W.cands.size(),
-                g_hooksInstalled ? 1 : 0);
+                "SILENT tgt=%d cand=%d hooked=%d orig=%p",
+                g_hasSilentTarget ? 1 : 0, (int)W.cands.size(),
+                g_hooksInstalled ? 1 : 0, (void*)g_orig_FireRay);
             dl->AddText(ImVec2(11, 131), IM_COL32(0, 0, 0, 255), st);
             dl->AddText(ImVec2(10, 130), IM_COL32(60, 200, 255, 255), st);
         }
     }
 
     // ============================================================
-    //  AIMBOT (existing)
+    //  AIMBOT
     // ============================================================
     void Status(ImDrawList* dl, const char* t)
     {
@@ -487,7 +513,6 @@ namespace
     {
         char st[340];
         if (!ResolveApi()) { std::snprintf(st, sizeof st, "AIM: missing %s", A.missing.c_str()); Status(dl, st); return; }
-
         double now = ImGui::GetTime();
         if (W.last < 0.0 || now - W.last >= Cfg::RefreshInterval) {
             W.last = now;
@@ -506,8 +531,7 @@ namespace
             if (il::ValidPtr((uintptr_t)c)) cam = (uintptr_t)c;
         }
         if (!il::ValidPtr(cam) || !il::ValidPtr(W.lock) || !il::ValidPtr(W.body)) {
-            std::snprintf(st, sizeof st, "AIM: no local view (pc=%d loc=%d cam=%d lock=%d body=%d)",
-                          W.nPc, W.nLocal, il::ValidPtr(cam), il::ValidPtr(W.lock), il::ValidPtr(W.body));
+            std::snprintf(st, sizeof st, "AIM: no local view");
             Status(dl, st);
             D.Reset(); W.lockedPc = 0; W.lostSince = -1.0; W.overrideUntil = -1.0;
             return;
@@ -557,7 +581,6 @@ namespace
         };
 
         const Cand* best = nullptr; V3 bestPos{}; void* bestBone = nullptr; int inFov = 0, hid = 0;
-
         if (W.lockedPc) {
             for (const Cand& c : W.cands) {
                 if (c.pc != W.lockedPc) continue;
@@ -571,13 +594,10 @@ namespace
                 }
                 break;
             }
-            if (!best && W.lostSince >= 0.0 && now - W.lostSince < Cfg::LoseGraceSec) {
-            } else if (!best) {
-                W.lockedPc = 0;
-                W.lostSince = -1.0;
+            if (!best && !(W.lostSince >= 0.0 && now - W.lostSince < Cfg::LoseGraceSec)) {
+                W.lockedPc = 0; W.lostSince = -1.0;
             }
         }
-
         for (const Cand& c : W.cands) {
             if (c.pc == W.lockedPc) continue;
             ImVec2 s; float d;
@@ -610,39 +630,31 @@ namespace
             if (FromDir(dir, des)) {
                 eY = Wrap(des.yaw - cur.yaw);
                 eP = des.pitch - cur.pitch;
-
                 float dt = std::clamp(ImGui::GetIO().DeltaTime, 0.001f, 0.1f);
                 float s = aim::aimbot_smoothing;
                 float alpha = (s <= 1.f) ? 1.f : 1.f - std::pow(1.f - 1.f / s, dt * 60.f);
-
                 float maxStep = Cfg::MaxDegPerSec * dt;
                 float dY  = std::clamp(eY * alpha, -maxStep, maxStep);
                 float dFp = -std::clamp(eP * alpha, -maxStep, maxStep);
-
                 if (std::isfinite(dY) && std::isfinite(dFp) && (std::fabs(eY) > 0.05f || std::fabs(eP) > 0.05f)) {
                     float x = 0.f, y = dY, z = 0.f;
                     int space = 0;
                     void* a[4] = { &x, &y, &z, &space };
                     il::Invoke(A.mRotate4, bodyTr, a);
-
                     float newPitch = fp + dFp;
                     float limit = Cfg::DefaultPitchLimit;
                     CallFloat(A.mLookXLimit, (void*)W.lock, limit);
                     newPitch = std::clamp(newPitch, -limit, limit);
                     il::Write<float>(W.lock + Cfg::PL_RotationX, newPitch);
-
-                    cmdY = dY;
-                    wrote = true;
+                    cmdY = dY; wrote = true;
                 }
             }
         }
         W.lastCmdY = cmdY;
-
         std::snprintf(st, sizeof st,
-            "AIM pc=%d loc=%d cand=%d fov=%d hid=%d tgt=%d lock=%d ovr=%d pred=%d | corrY=%.2f eY=%.1f eP=%.1f rx=%.1f %s",
-            W.nPc, W.nLocal, (int)W.cands.size(), inFov, hid, best ? 1 : 0, (int)(W.lockedPc != 0),
-            overriding ? 1 : 0, predicted ? 1 : 0, D.corrY, eY, eP, fp,
-            overriding ? "OVERRIDE" : (wrote ? "writing" : "idle"));
+            "AIM cand=%d fov=%d hid=%d tgt=%d ovr=%d | eY=%.1f eP=%.1f %s",
+            (int)W.cands.size(), inFov, hid, best ? 1 : 0, overriding ? 1 : 0,
+            eY, eP, overriding ? "OVERRIDE" : (wrote ? "writing" : "idle"));
         Status(dl, st);
     }
 }
