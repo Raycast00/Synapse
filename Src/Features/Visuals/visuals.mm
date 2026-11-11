@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include <utility>
 
 namespace il = IL2CPP;
 
@@ -51,6 +52,7 @@ namespace
         void *mGetBounds{}, *mGetCompInChildren{}, *mObjGetName{}, *mGetBones{}, *mGetHeadBone{};
         void *mScreenW{}, *mScreenH{};
         void *mPcHealth{}, *mPlayerTeam{}, *mPlayerIsAlive{}, *mSkelWeapon{}, *mBombTimeLeft{};
+        void *mGetParent{};
     } A;
 
     bool ResolveApi()
@@ -74,6 +76,7 @@ namespace
         A.kSMR           = il::Class("UnityEngine", "SkinnedMeshRenderer", core);
 
         A.mGetTransform      = il::Method(kComponent, "get_transform", 0);
+        A.mGetParent = il::Method(kTransform, "get_parent", 0);
         A.mGetCompInChildren = il::Method(kComponent, "GetComponentInChildren", 2);
         A.mGetPosition       = il::Method(kTransform, "get_position", 0);
         A.mW2S               = il::Method(kCamera, "WorldToScreenPoint", 1);
@@ -149,12 +152,14 @@ namespace
         std::vector<uintptr_t> bones;   // Transform* костей скина (до MaxBones)
         float reach = 0.f;
         std::string name, team, weapon;
+        std::vector<std::pair<uintptr_t, int>> skelBones;
     };
 
     struct Stats
     {
         int pc = 0, local = 0, noPlayer = 0, noSkel = 0, noBody = 0, withBones = 0;
         int boundsBad = 0, behind = 0, tiny = 0, drawn = 0, teamSkipped = 0, dead = 0, fallback = 0;
+        int withSkel = 0;
     } S;
 
     struct Frame
@@ -244,6 +249,51 @@ namespace
                 e.bones.push_back(hb);
         }
         e.reach = maxD * Cfg::ReachK;
+    }
+
+        // Полный скелет для линий: все кости SkinnedMeshRenderer с их реальными родителями внутри этого же
+    // набора (Transform.get_parent()). Никаких имён вроде "рука"/"нога" — ровно то, что отдаёт модель.
+    void CollectSkeletonBones(Ent& e)
+    {
+        e.skelBones.clear();
+        if (!A.mGetParent || !A.mGetBones || !il::ValidPtr(e.body)) return;
+
+        uintptr_t arr = (uintptr_t)il::Invoke(A.mGetBones, (void*)e.body, nullptr);
+        if (!il::ValidPtr(arr)) return;
+        uint64_t len = il::Read<uint64_t>(arr + 0x18);
+        if (len < 2 || len > Cfg::MaxSourceBones) return;
+
+        std::vector<uintptr_t> tr;
+        std::vector<V3> pos;
+        for (uint64_t i = 0; i < len; i++) {
+            uintptr_t t = il::Read<uintptr_t>(arr + 0x20 + i * 8);
+            if (!il::ValidPtr(t)) continue;
+            V3 p = il::InvokeBoxed<V3>(A.mGetPosition, (void*)t, nullptr);
+            if (!Finite(p)) continue;
+            tr.push_back(t); pos.push_back(p);
+        }
+        if (tr.size() < 2) return;
+
+        V3 c = MedianPoint(pos);
+        std::vector<float> d;
+        for (const V3& p : pos) d.push_back(Dist(p, c));
+        std::vector<float> dm = d;
+        float lim = std::max(Median(dm) * Cfg::OutlierK, 1e-3f);
+
+        std::vector<uintptr_t> chosen;
+        for (size_t i = 0; i < tr.size(); i++) if (d[i] <= lim) chosen.push_back(tr[i]);
+        if (chosen.size() < 2) return;
+
+        for (size_t idx = 0; idx < chosen.size(); idx++) {
+            void* parent = il::Invoke(A.mGetParent, (void*)chosen[idx], nullptr);
+            int parentIdx = -1;
+            if (il::ValidPtr((uintptr_t)parent)) {
+                for (size_t j = 0; j < chosen.size(); j++) {
+                    if (chosen[j] == (uintptr_t)parent) { parentIdx = (int)j; break; }
+                }
+            }
+            e.skelBones.push_back({ chosen[idx], parentIdx });
+        }
     }
 
     void Refresh()
@@ -446,6 +496,21 @@ void visuals::run()
                 dl->AddRect(ImVec2(a.x - 1, a.y - 1), ImVec2(b.x + 1, b.y + 1), IM_COL32(0, 0, 0, 200));
                 dl->AddRect(a, b, Col(box_color));
             } else CornerBox(dl, a, b, Col(box_color));
+        }
+
+        if (skeleton) {
+            ImU32 skelCol = Col(skeleton_color);
+            for (const auto& [childTr, parentIdx] : e.skelBones) {
+                if (parentIdx < 0) continue;
+                uintptr_t parentTr = e.skelBones[parentIdx].first;
+                V3 cp = il::InvokeBoxed<V3>(A.mGetPosition, (void*)childTr, nullptr);
+                V3 pp = il::InvokeBoxed<V3>(A.mGetPosition, (void*)parentTr, nullptr);
+                if (!Finite(cp) || !Finite(pp)) continue;
+                ImVec2 cs, ps;
+                if (!W2S(cp, sx, sy, (float)sh, cs)) continue;
+                if (!W2S(pp, sx, sy, (float)sh, ps)) continue;
+                dl->AddLine(cs, ps, skelCol);
+            }
         }
 
         if (healthBar || healthBarText) {
