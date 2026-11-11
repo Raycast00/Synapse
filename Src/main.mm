@@ -206,7 +206,7 @@ static bool   g_tLeave = false;
 
                 // GRENADE
                 ImGui::SeparatorText("Grenade");
-                ImGui::Checkbox("Visualize Trajectory", &visuals::visualize_trajectory);
+                ImGui::Checkbox("Visualize Trajectory", &visuals::visualize_grenade_trajectory);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## Trajectory Color", visuals::grenade_trajectory_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
             }
