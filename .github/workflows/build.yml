@@ -11,11 +11,25 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Build Dobby (iOS arm64)
+        run: |
+          set -e
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          cmake -S Src/Dobby -B Src/Dobby/build/ios-arm64 \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_SYSTEM_PROCESSOR=arm64 \
+            -DCMAKE_OSX_SYSROOT="$SDK" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build Src/Dobby/build/ios-arm64 --target dobby_static -j4
+          test -f Src/Dobby/build/ios-arm64/libdobby.a
+
       - name: Compile dylib
         run: |
           xcrun -sdk iphoneos clang++ -arch arm64 -miphoneos-version-min=14.0 -std=c++17 -fobjc-arc -O2 \
             -dynamiclib \
-            -I Src -I Src/ImGui -I Src/ImGui/Backends -I Src/Memory \
+            -I Src -I Src/ImGui -I Src/ImGui/Backends -I Src/Memory -I Src/Dobby/include \
             Src/main.mm \
             Src/Features/Visuals/visuals.mm \
             Src/Features/Aim/aim.mm \
@@ -36,6 +50,7 @@ jobs:
             Src/ImGui/imgui_widgets.cpp \
             Src/ImGui/Backends/imgui_impl_metal.mm \
             Src/Memory/Deps/Keystone/libs-ios/arm64/libkeystone.a \
+            Src/Dobby/build/ios-arm64/libdobby.a \
             -framework UIKit -framework Foundation -framework Metal -framework MetalKit -framework QuartzCore -framework CoreGraphics \
             -o Synapse.dylib
       - name: Verify
