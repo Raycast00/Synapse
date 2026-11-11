@@ -1,6 +1,9 @@
 #include "aim.h"
 #include "imgui.h"
 #include "il2cpp/il2cpp.h"
+#include "Dobby/include/dobby.h"
+
+#import <Foundation/Foundation.h>
 
 #include <algorithm>
 #include <cmath>
@@ -9,56 +12,48 @@
 #include <string>
 #include <vector>
 
-#include "Dobby/include/dobby.h"
-
 namespace il = IL2CPP;
 
 namespace
 {
     struct V3 { float x, y, z; };
 
-    constexpr bool  kStatus = true;          // строка диагностики на экране; false = выключить
+    constexpr bool  kStatus = true;
     constexpr float kR2D    = 57.2957795f;
 
-    // Источник оффсетов: dump.cs, присланный пользователем (Assembly-CSharp).
     namespace Cfg
     {
-        constexpr uintptr_t PC_IsRagdolling = 0x49;  // PlayerController.IsRagdolling
-        constexpr uintptr_t PC_MainCamera   = 0x30;  // PlayerController._mainCamera
-        constexpr uintptr_t PC_PlayerLock   = 0x68;  // PlayerController._playerLock
-        constexpr uintptr_t PC_Player       = 0x90;  // PlayerController._player
-        constexpr uintptr_t PC_IsDeath      = 0xA8;  // PlayerController._isDeath
-        constexpr uintptr_t PC_HiddenMask   = 0xC4;  // PlayerController._hiddenMask
-        constexpr int HiddenByRound = 1, HiddenBySpectate = 2, HiddenByOcclusion = 4;   // const в PlayerController
-        constexpr int HiddenAlways  = HiddenByRound | HiddenBySpectate;   // не про стены, блокирует всегда
+        constexpr uintptr_t PC_IsRagdolling = 0x49;
+        constexpr uintptr_t PC_MainCamera   = 0x30;
+        constexpr uintptr_t PC_PlayerLock   = 0x68;
+        constexpr uintptr_t PC_Player       = 0x90;
+        constexpr uintptr_t PC_IsDeath      = 0xA8;
+        constexpr uintptr_t PC_HiddenMask   = 0xC4;
+        constexpr int HiddenByRound = 1, HiddenBySpectate = 2, HiddenByOcclusion = 4;
+        constexpr int HiddenAlways  = HiddenByRound | HiddenBySpectate;
 
-        constexpr uintptr_t PL_PlayerBody   = 0x20;  // PlayerLock._playerBody (GameObject)
-        constexpr uintptr_t PL_RotationX    = 0x40;  // PlayerLock.rotationX (public float, питч, градусы Эйлера)
+        constexpr uintptr_t PL_PlayerBody   = 0x20;
+        constexpr uintptr_t PL_RotationX    = 0x40;
 
-        constexpr uintptr_t Player_IsLocal  = 0x1C;  // Photon.Realtime.Player.IsLocal
-        constexpr uintptr_t Skel_Body = 0x60;
-        constexpr uintptr_t Skel_HeadBone   = 0xC0;  // PlayerSkeleton._headBone (предположительно Rigidbody), запасной вариант
-        constexpr uintptr_t Skel_ChestBone  = 0xC8;  // PlayerSkeleton._chestBone (предположительно Rigidbody)
-        constexpr uintptr_t Skel_PelvisBone = 0xD0;  // PlayerSkeleton._pelvisBone (предположительно Rigidbody), запасной вариант
+        constexpr uintptr_t Player_IsLocal  = 0x1C;
+        constexpr uintptr_t Skel_Body       = 0x60;
+        constexpr uintptr_t Skel_HeadBone   = 0xC0;
+        constexpr uintptr_t Skel_ChestBone  = 0xC8;
+        constexpr uintptr_t Skel_PelvisBone = 0xD0;
 
-        constexpr double RefreshInterval = 0.25;     // период пересборки списка целей, сек
+        constexpr double RefreshInterval = 0.25;
 
-        // Не откалибровано, подбирать в игре.
-        constexpr float  KeepRadiusMul     = 1.5f;   // держим текущую цель, пока она внутри fov_radius*этот множитель
-        constexpr double LoseGraceSec      = 0.15;   // сколько секунд терпим потерю цели (окклюзия на кадр, моргание), прежде чем сбросить
-        constexpr float  MaxDegPerSec      = 220.f;  // жёсткий потолок скорости поворота по обеим осям
-        constexpr float  DefaultPitchLimit = 80.f;   // запасной лимит питча, если get_LookXLimit недоступен
+        constexpr float  KeepRadiusMul     = 1.5f;
+        constexpr double LoseGraceSec      = 0.15;
+        constexpr float  MaxDegPerSec      = 220.f;
+        constexpr float  DefaultPitchLimit = 80.f;
 
-        // Детектор "ты сам резко увёл взгляд" — отпускаем цель и ставим коррекцию на паузу.
-        constexpr float  OverrideYawDegPerFrame = 12.f;   // свой вклад за кадр больше этого — считаем сознательным уводом
-        constexpr double OverrideHoldSec        = 0.25;   // на сколько пауза
+        constexpr float  OverrideYawDegPerFrame = 12.f;
+        constexpr double OverrideHoldSec        = 0.25;
 
-        // Prediction (только для aimbot): нет поля скорости снаряда в dump.cs (оружие похоже на хитскан),
-        // поэтому компенсируем не баллистику, а задержку собственного сглаживания.
         constexpr float  PredictLeadSec  = 0.12f;
-        constexpr float  MaxSaneSpeed    = 15.f;    // м/с, отсечка на случай мусора в Rigidbody.velocity
+        constexpr float  MaxSaneSpeed    = 15.f;
 
-        // Диагностика корреляции команда/реальный угол — только для статуса, в управление не идёт.
         constexpr double CalibWindow   = 0.20;
         constexpr float  MinDelta      = 0.30f;
     }
@@ -67,11 +62,12 @@ namespace
     {
         bool ready = false;
         std::string missing;
-        void *kPC{}, *kPlayer{}, *kSkel{}, *kPlayerLock{}, *kRigidbody{};
+        void *kPC{}, *kPlayer{}, *kSkel{}, *kPlayerLock{}, *kRigidbody{}, *kArms{};
         void *mGetTransform{}, *mGoGetTransform{}, *mGetCompInChildren{}, *mGetPos{}, *mGetFwd{}, *mRotate4{};
         void *mW2S{}, *mCamMain{}, *mScreenW{}, *mScreenH{}, *mGetHeadBone{};
         void *mTeam{}, *mIsAlive{}, *mHealth{}, *mLookXLimit{}, *mGetVelocity{};
         void *kSMR{}, *mGetBones{};
+        void *mFireRay{};
     } A;
 
     bool ResolveApi()
@@ -85,9 +81,10 @@ namespace
         A.kSkel       = il::Class("ScarletWork.Game", "PlayerSkeleton", "Assembly-CSharp");
         A.kPlayerLock = il::Class("ScarletWork.Game", "PlayerLock", "Assembly-CSharp");
         A.kPlayer     = il::Class("Photon.Realtime", "Player", "PhotonRealtime");
-        A.kRigidbody  = il::Class("UnityEngine", "Rigidbody", "UnityEngine.PhysicsModule");   // опционально, для prediction
-        A.kSMR      = il::Class("UnityEngine", "SkinnedMeshRenderer", core);
-        A.mGetBones = il::Method(A.kSMR, "get_bones", 0);   // опционально
+        A.kRigidbody  = il::Class("UnityEngine", "Rigidbody", "UnityEngine.PhysicsModule");
+        A.kArms       = il::Class("", "ArmsController", "Assembly-CSharp");
+        A.kSMR        = il::Class("UnityEngine", "SkinnedMeshRenderer", core);
+        A.mGetBones   = il::Method(A.kSMR, "get_bones", 0);
 
         void* kComponent  = il::Class("UnityEngine", "Component", core);
         void* kGameObject = il::Class("UnityEngine", "GameObject", core);
@@ -100,17 +97,20 @@ namespace
         A.mGetCompInChildren = il::Method(kComponent, "GetComponentInChildren", 2);
         A.mGetPos            = il::Method(kTransform, "get_position", 0);
         A.mGetFwd            = il::Method(kTransform, "get_forward", 0);
-        A.mRotate4           = il::Method(kTransform, "Rotate", 4);      // Rotate(float x, float y, float z, Space)
+        A.mRotate4           = il::Method(kTransform, "Rotate", 4);
         A.mW2S               = il::Method(kCamera, "WorldToScreenPoint", 1);
         A.mCamMain           = il::Method(kCamera, "get_main", 0);
         A.mScreenW           = il::Method(kScreen, "get_width", 0);
         A.mScreenH           = il::Method(kScreen, "get_height", 0);
-        A.mGetHeadBone       = il::Method(A.kSkel, "GetHeadBone", 0);          // опционально
-        A.mTeam              = il::Method(A.kPlayer, "get_Team", 0);           // опционально
-        A.mIsAlive           = il::Method(A.kPlayer, "get_IsAlive", 0);        // опционально
-        A.mHealth            = il::Method(A.kPC, "get_Health", 0);             // опционально
-        A.mLookXLimit        = il::Method(A.kPlayerLock, "get_LookXLimit", 0); // опционально
-        A.mGetVelocity       = il::Method(A.kRigidbody, "get_velocity", 0);    // опционально, для prediction
+        A.mGetHeadBone       = il::Method(A.kSkel, "GetHeadBone", 0);
+        A.mTeam              = il::Method(A.kPlayer, "get_Team", 0);
+        A.mIsAlive           = il::Method(A.kPlayer, "get_IsAlive", 0);
+        A.mHealth            = il::Method(A.kPC, "get_Health", 0);
+        A.mLookXLimit        = il::Method(A.kPlayerLock, "get_LookXLimit", 0);
+        A.mGetVelocity       = il::Method(A.kRigidbody, "get_velocity", 0);
+
+        // Silent Aim: ArmsController.FireRay(Vector3 camPos, Vector3 forward, float distance)
+        A.mFireRay           = il::Method(A.kArms, "FireRay", 3);
 
         need(A.kPC, "PlayerController"); need(A.kSkel, "PlayerSkeleton"); need(A.kPlayerLock, "PlayerLock");
         need(A.mGetTransform, "Component.get_transform"); need(A.mGoGetTransform, "GameObject.get_transform");
@@ -173,19 +173,17 @@ namespace
         return PosOfTransform(tr, out);
     }
 
-    // Скорость объекта, только если его реальный класс — Rigidbody (проверено рантаймом, не на веру).
     bool VelocityOfRigidbody(void* obj, V3& out)
     {
         if (!A.mGetVelocity || !A.kRigidbody || !il::ValidPtr((uintptr_t)obj)) return false;
         void* cls = il::ClassOf(obj);
-        if (cls != A.kRigidbody) return false;   // не тот тип — не рискуем звать чужой метод
+        if (cls != A.kRigidbody) return false;
         out = il::InvokeBoxed<V3>(A.mGetVelocity, obj, nullptr);
         if (!Finite(out)) return false;
         float sp = std::sqrt(out.x * out.x + out.y * out.y + out.z * out.z);
         return sp <= Cfg::MaxSaneSpeed;
     }
 
-    // ---- Цели ----
     struct Cand { uintptr_t pc = 0, player = 0, skeleton = 0, headBone = 0; std::string team; };
 
     struct World
@@ -201,8 +199,8 @@ namespace
         double    lostSince = -1.0;
         uintptr_t prevLock = 0;
 
-        double overrideUntil = -1.0;   // до этого времени не пишем коррекцию — ты сам уводишь взгляд
-        float  lastCmdY = 0.f;         // сколько реальных градусов по яву мы сами скомандовали прошлым кадром
+        double overrideUntil = -1.0;
+        float  lastCmdY = 0.f;
     } W;
 
     uintptr_t PickHeadBone(uintptr_t body)
@@ -210,7 +208,7 @@ namespace
         if (!A.mGetBones || !il::ValidPtr(body)) return 0;
         uintptr_t arr = (uintptr_t)il::Invoke(A.mGetBones, (void*)body, nullptr);
         if (!il::ValidPtr(arr)) return 0;
-        uint64_t len = il::Read<uint64_t>(arr + 0x18);     // Il2CppArray: max_length @0x18, data @0x20
+        uint64_t len = il::Read<uint64_t>(arr + 0x18);
         if (len == 0 || len > 512) return 0;
 
         uintptr_t best = 0; float bestY = -1e9f;
@@ -249,7 +247,7 @@ namespace
                 }
                 W.haveLocal = true;
                 W.localTeam = team;
-                continue;                                   // себя в цели не берём
+                continue;
             }
 
             bool inc = true;
@@ -286,7 +284,6 @@ namespace
     double g_nextRoll = 0.0;
     bool   g_rollHead = true;
 
-    // bone — указатель на объект, который дал позицию (если это реально Rigidbody, из него же берём скорость).
     bool AimPoint(const Cand& c, V3& out, void*& bone)
     {
         bone = nullptr;
@@ -319,12 +316,11 @@ namespace
         void* a[1] = { &p };
         V3 s = il::InvokeBoxed<V3>(A.mW2S, (void*)cam, a);
         if (!Finite(s) || s.z <= 0.f) return false;
-        out = ImVec2(s.x * sx, (screenH - s.y) * sy);   // Unity: начало снизу-слева, ImGui: сверху-слева
+        out = ImVec2(s.x * sx, (screenH - s.y) * sy);
         return true;
     }
 
-    // ---- Углы ----
-    struct Ang { float yaw, pitch; };   // градусы; yaw = atan2(x, z), pitch > 0 = вверх
+    struct Ang { float yaw, pitch; };
 
     bool FromDir(const V3& d, Ang& out)
     {
@@ -336,16 +332,150 @@ namespace
     }
     float Wrap(float a) { while (a > 180.f) a -= 360.f; while (a < -180.f) a += 360.f; return a; }
 
-    // Диагностика корреляции (только для статуса, в управление НЕ идёт — Transform.Rotate и rotationX
-    // уже в реальных градусах, калибровка здесь лишняя и была источником перекручивания).
     struct Diag
     {
         float lastY = 0.f, lastP = 0.f;
         bool  have = false;
-        float corrY = 0.f, corrP = 0.f;   // последняя измеренная "реальный угол / команда", только для чтения
+        float corrY = 0.f, corrP = 0.f;
         void  Reset() { have = false; }
     } D;
 
+    // ============================================================
+    //  SILENT AIM
+    // ============================================================
+    using FireRay_t = void(*)(void* __this, V3 camPos, V3 forward, float distance);
+    static FireRay_t g_orig_FireRay = nullptr;
+    static bool      g_hooksInstalled = false;
+    static bool      g_hasSilentTarget = false;
+    static V3        g_silentTarget = {};
+
+    static void hook_FireRay(void* __this, V3 camPos, V3 forward, float distance)
+    {
+        if (aim::silent && g_hasSilentTarget) {
+            V3 dir = {
+                g_silentTarget.x - camPos.x,
+                g_silentTarget.y - camPos.y,
+                g_silentTarget.z - camPos.z
+            };
+            float len = std::sqrt(dir.x*dir.x + dir.y*dir.y + dir.z*dir.z);
+            if (len > 1e-4f) {
+                forward.x = dir.x / len;
+                forward.y = dir.y / len;
+                forward.z = dir.z / len;
+            }
+        }
+        if (g_orig_FireRay) g_orig_FireRay(__this, camPos, forward, distance);
+    }
+
+    static void SetupSilentHook()
+    {
+        if (g_hooksInstalled) return;
+
+        if (!A.mFireRay) {
+            NSLog(@"[silent] FireRay method not resolved");
+            return;
+        }
+
+        void* codeAddr = *(void**)A.mFireRay;
+        if (!codeAddr) {
+            NSLog(@"[silent] FireRay methodPointer is null");
+            return;
+        }
+
+        int rc = DobbyHook(codeAddr, (void*)hook_FireRay, (void**)&g_orig_FireRay);
+        if (rc != 0) {
+            NSLog(@"[silent] DobbyHook failed rc=%d", rc);
+            return;
+        }
+
+        NSLog(@"[silent] Hooked FireRay @ %p", codeAddr);
+        g_hooksInstalled = true;
+    }
+
+    void SilentFrame(ImDrawList* dl, ImVec2 center)
+    {
+        if (!aim::silent) {
+            g_hasSilentTarget = false;
+            return;
+        }
+
+        double now = ImGui::GetTime();
+        if (W.last < 0.0 || now - W.last >= Cfg::RefreshInterval) {
+            W.last = now;
+            Refresh();
+            if (W.lock != W.prevLock) {
+                g_hasSilentTarget = false;
+                W.prevLock = W.lock;
+            }
+        }
+
+        g_hasSilentTarget = false;
+
+        uintptr_t cam = W.camera;
+        if (!il::ValidPtr(cam)) {
+            void* c = il::Invoke(A.mCamMain, nullptr, nullptr);
+            if (il::ValidPtr((uintptr_t)c)) cam = (uintptr_t)c;
+        }
+        if (!il::ValidPtr(cam)) return;
+
+        int sw = il::InvokeBoxed<int>(A.mScreenW, nullptr, nullptr);
+        int sh = il::InvokeBoxed<int>(A.mScreenH, nullptr, nullptr);
+        if (sw <= 0 || sh <= 0) return;
+
+        ImVec2 disp = ImGui::GetIO().DisplaySize;
+        float sx = disp.x / (float)sw, sy = disp.y / (float)sh;
+
+        const Cand* best = nullptr;
+        V3 bestPos{};
+        float bestD = 1e9f;
+
+        for (const Cand& c : W.cands) {
+            if (W.haveLocal && !W.localTeam.empty() && c.team == W.localTeam) continue;
+            if (IsDead(c)) continue;
+            if (IsAlwaysHidden(c)) continue;
+            if (!aim::aim_through_walls && IsOccluded(c)) continue;
+
+            V3 p; void* bone;
+            if (!AimPoint(c, p, bone)) continue;
+
+            ImVec2 s;
+            if (!W2S(cam, p, sx, sy, (float)sh, s)) continue;
+
+            float d = std::hypot(s.x - center.x, s.y - center.y);
+            if (d > aim::fov_radius) continue;
+
+            if (d < bestD) {
+                bestD = d;
+                best = &c;
+                bestPos = p;
+            }
+        }
+
+        if (best) {
+            g_silentTarget = bestPos;
+            g_hasSilentTarget = true;
+
+            ImVec2 s;
+            if (W2S(cam, bestPos, sx, sy, (float)sh, s)) {
+                dl->AddCircle(s, 6.0f, IM_COL32(255, 60, 60, 255), 12, 1.5f);
+            }
+        }
+
+        if (kStatus) {
+            char st[160];
+            std::snprintf(st, sizeof st,
+                "SILENT tgt=%d cand=%d hooked=%d",
+                g_hasSilentTarget ? 1 : 0,
+                (int)W.cands.size(),
+                g_hooksInstalled ? 1 : 0);
+            dl->AddText(ImVec2(11, 131), IM_COL32(0, 0, 0, 255), st);
+            dl->AddText(ImVec2(10, 130), IM_COL32(60, 200, 255, 255), st);
+        }
+    }
+
+    // ============================================================
+    //  AIMBOT (existing)
+    // ============================================================
     void Status(ImDrawList* dl, const char* t)
     {
         if (!kStatus) return;
@@ -362,7 +492,7 @@ namespace
         if (W.last < 0.0 || now - W.last >= Cfg::RefreshInterval) {
             W.last = now;
             Refresh();
-            if (W.lock != W.prevLock) {           // новый матч/респавн локального игрока
+            if (W.lock != W.prevLock) {
                 D.Reset();
                 W.lockedPc = 0; W.lostSince = -1.0; W.overrideUntil = -1.0; W.lastCmdY = 0.f;
                 W.prevLock = W.lock;
@@ -400,22 +530,20 @@ namespace
         float fp = il::Read<float>(W.lock + Cfg::PL_RotationX);
         if (!std::isfinite(fp)) return;
 
-        // Детектор "сам резко увёл взгляд": сравниваем реальное изменение яв за кадр с тем, что скомандовали мы сами.
         bool overriding = false;
         if (D.have) {
             float realDY = Wrap(cur.yaw - D.lastY);
             float userDY = realDY - W.lastCmdY;
             if (std::fabs(userDY) > Cfg::OverrideYawDegPerFrame) {
                 W.overrideUntil = now + Cfg::OverrideHoldSec;
-                W.lockedPc = 0;        // сразу отпускаем старую цель, дальше выбор пойдёт заново
+                W.lockedPc = 0;
                 W.lostSince = -1.0;
             }
-            if (std::fabs(realDY) > 1e-6f) D.corrY = userDY / realDY;   // чисто для статуса
+            if (std::fabs(realDY) > 1e-6f) D.corrY = userDY / realDY;
         }
         overriding = now < W.overrideUntil;
         D.lastY = cur.yaw; D.lastP = cur.pitch; D.have = true;
 
-        // Выбор цели: сначала пробуем удержать уже выбранную, чтобы не дёргаться на границе FOV.
         auto qualifies = [&](const Cand& c, ImVec2& s, float& d) -> bool {
             if (W.haveLocal && !W.localTeam.empty() && c.team == W.localTeam) return false;
             if (IsDead(c)) return false;
@@ -444,7 +572,6 @@ namespace
                 break;
             }
             if (!best && W.lostSince >= 0.0 && now - W.lostSince < Cfg::LoseGraceSec) {
-                // в пределах льготного времени просто не трогаем прицел в этом кадре
             } else if (!best) {
                 W.lockedPc = 0;
                 W.lostSince = -1.0;
@@ -489,12 +616,12 @@ namespace
                 float alpha = (s <= 1.f) ? 1.f : 1.f - std::pow(1.f - 1.f / s, dt * 60.f);
 
                 float maxStep = Cfg::MaxDegPerSec * dt;
-                float dY  = std::clamp(eY * alpha, -maxStep, maxStep);   // реальные градусы, Rotate их и ждёт
-                float dFp = -std::clamp(eP * alpha, -maxStep, maxStep);   // rotationX тоже в градусах Эйлера
+                float dY  = std::clamp(eY * alpha, -maxStep, maxStep);
+                float dFp = -std::clamp(eP * alpha, -maxStep, maxStep);
 
                 if (std::isfinite(dY) && std::isfinite(dFp) && (std::fabs(eY) > 0.05f || std::fabs(eP) > 0.05f)) {
                     float x = 0.f, y = dY, z = 0.f;
-                    int space = 0;                          // Space.World
+                    int space = 0;
                     void* a[4] = { &x, &y, &z, &space };
                     il::Invoke(A.mRotate4, bodyTr, a);
 
@@ -529,14 +656,17 @@ void aim::run()
     float screenHeight = ImGui::GetIO().DisplaySize.y;
     ImVec2 center(screenWidth / 2.0f, screenHeight / 2.0f);
 
-    if (aim::aimbot) {
-        AimbotFrame(draw, center);
-    } else {
-        D.Reset();
-        W.lockedPc = 0;
-        W.lostSince = -1.0;
-        W.overrideUntil = -1.0;
+    if (!ResolveApi()) {
+        char st[200];
+        std::snprintf(st, sizeof st, "AIM: missing %s", A.missing.c_str());
+        Status(draw, st);
+        return;
     }
+
+    if (aim::silent && !g_hooksInstalled) SetupSilentHook();
+
+    if (aim::aimbot) AimbotFrame(draw, center);
+    if (aim::silent) SilentFrame(draw, center);
 
     if (aim::draw_fov) {
         draw->AddCircle(center, aim::fov_radius, ImGui::ColorConvertFloat4ToU32({
