@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "Dobby/include/dobby.h"
+
 namespace il = IL2CPP;
 
 namespace
