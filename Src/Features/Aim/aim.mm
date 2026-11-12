@@ -2,17 +2,11 @@
 #include "imgui.h"
 #include "il2cpp/il2cpp.h"
 
-#import <Foundation/Foundation.h>
-#include <mach/mach.h>
-#include <mach/vm_map.h>
-#include <libkern/OSCacheControl.h>
-
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <string>
 #include <vector>
 
@@ -24,38 +18,48 @@ namespace
 {
     struct V3 { float x, y, z; };
 
-    constexpr bool  kStatus = true;
+    constexpr bool  kStatus = true;          // строка диагностики на экране; false = выключить
     constexpr float kR2D    = 57.2957795f;
 
+    // Источник оффсетов: dump.cs, присланный пользователем (Assembly-CSharp).
     namespace Cfg
     {
-        constexpr uintptr_t PC_IsRagdolling = 0x49;
-        constexpr uintptr_t PC_MainCamera   = 0x30;
-        constexpr uintptr_t PC_PlayerLock   = 0x68;
-        constexpr uintptr_t PC_Player       = 0x90;
-        constexpr uintptr_t PC_IsDeath      = 0xA8;
-        constexpr uintptr_t PC_HiddenMask   = 0xC4;
-        constexpr int HiddenByRound = 1, HiddenBySpectate = 2, HiddenByOcclusion = 4;
-        constexpr int HiddenAlways  = HiddenByRound | HiddenBySpectate;
+        constexpr uintptr_t PC_IsRagdolling = 0x49;  // PlayerController.IsRagdolling
+        constexpr uintptr_t PC_MainCamera   = 0x30;  // PlayerController._mainCamera
+        constexpr uintptr_t PC_PlayerLock   = 0x68;  // PlayerController._playerLock
+        constexpr uintptr_t PC_Player       = 0x90;  // PlayerController._player
+        constexpr uintptr_t PC_IsDeath      = 0xA8;  // PlayerController._isDeath
+        constexpr uintptr_t PC_HiddenMask   = 0xC4;  // PlayerController._hiddenMask
+        constexpr int HiddenByRound = 1, HiddenBySpectate = 2, HiddenByOcclusion = 4;   // const в PlayerController
+        constexpr int HiddenAlways  = HiddenByRound | HiddenBySpectate;   // не про стены, блокирует всегда
 
-        constexpr uintptr_t PL_PlayerBody   = 0x20;
-        constexpr uintptr_t PL_RotationX    = 0x40;
+        constexpr uintptr_t PL_PlayerBody   = 0x20;  // PlayerLock._playerBody (GameObject)
+        constexpr uintptr_t PL_RotationX    = 0x40;  // PlayerLock.rotationX (public float, питч, градусы Эйлера)
 
-        constexpr uintptr_t Player_IsLocal  = 0x1C;
-        constexpr uintptr_t Skel_Body       = 0x60;
-        constexpr uintptr_t Skel_HeadBone   = 0xC0;
-        constexpr uintptr_t Skel_ChestBone  = 0xC8;
-        constexpr uintptr_t Skel_PelvisBone = 0xD0;
+        constexpr uintptr_t Player_IsLocal  = 0x1C;  // Photon.Realtime.Player.IsLocal
+        constexpr uintptr_t Skel_Body       = 0x60;  // PlayerSkeleton._body
+        constexpr uintptr_t Skel_HeadBone   = 0xC0;  // PlayerSkeleton._headBone (предположительно Rigidbody), запасной вариант
+        constexpr uintptr_t Skel_ChestBone  = 0xC8;  // PlayerSkeleton._chestBone (предположительно Rigidbody)
+        constexpr uintptr_t Skel_PelvisBone = 0xD0;  // PlayerSkeleton._pelvisBone (предположительно Rigidbody), запасной вариант
 
-        constexpr double RefreshInterval = 0.25;
-        constexpr float  KeepRadiusMul     = 1.5f;
-        constexpr double LoseGraceSec      = 0.15;
-        constexpr float  MaxDegPerSec      = 220.f;
-        constexpr float  DefaultPitchLimit = 80.f;
-        constexpr float  OverrideYawDegPerFrame = 12.f;
-        constexpr double OverrideHoldSec        = 0.25;
+        constexpr double RefreshInterval = 0.25;     // период пересборки списка целей, сек
+
+        // Не откалибровано, подбирать в игре.
+        constexpr float  KeepRadiusMul     = 1.5f;   // держим текущую цель, пока она внутри fov_radius*этот множитель
+        constexpr double LoseGraceSec      = 0.15;   // сколько секунд терпим потерю цели (окклюзия на кадр, моргание), прежде чем сбросить
+        constexpr float  MaxDegPerSec      = 220.f;  // жёсткий потолок скорости поворота по обеим осям
+        constexpr float  DefaultPitchLimit = 80.f;   // запасной лимит питча, если get_LookXLimit недоступен
+
+        // Детектор "ты сам резко увёл взгляд" — отпускаем цель и ставим коррекцию на паузу.
+        constexpr float  OverrideYawDegPerFrame = 12.f;   // свой вклад за кадр больше этого — считаем сознательным уводом
+        constexpr double OverrideHoldSec        = 0.25;   // на сколько пауза
+
+        // Prediction (только для aimbot/silent): нет поля скорости снаряда в dump.cs (оружие похоже на хитскан),
+        // поэтому компенсируем не баллистику, а задержку собственного сглаживания.
         constexpr float  PredictLeadSec  = 0.12f;
-        constexpr float  MaxSaneSpeed    = 15.f;
+        constexpr float  MaxSaneSpeed    = 15.f;    // м/с, отсечка на случай мусора в Rigidbody.velocity
+
+        // Silent aim: сколько времени кэшированная цель считается ещё свежей для хука FireRay.
         constexpr double SilentTargetMaxAge = 0.35;
     }
 
@@ -81,9 +85,9 @@ namespace
         A.kSkel       = il::Class("ScarletWork.Game", "PlayerSkeleton", "Assembly-CSharp");
         A.kPlayerLock = il::Class("ScarletWork.Game", "PlayerLock", "Assembly-CSharp");
         A.kPlayer     = il::Class("Photon.Realtime", "Player", "PhotonRealtime");
-        A.kRigidbody  = il::Class("UnityEngine", "Rigidbody", "UnityEngine.PhysicsModule");
+        A.kRigidbody  = il::Class("UnityEngine", "Rigidbody", "UnityEngine.PhysicsModule");   // опционально, для prediction
         A.kSMR        = il::Class("UnityEngine", "SkinnedMeshRenderer", core);
-        A.mGetBones   = il::Method(A.kSMR, "get_bones", 0);
+        A.mGetBones   = il::Method(A.kSMR, "get_bones", 0);   // опционально
 
         void* kComponent  = il::Class("UnityEngine", "Component", core);
         void* kGameObject = il::Class("UnityEngine", "GameObject", core);
@@ -96,17 +100,17 @@ namespace
         A.mGetCompInChildren = il::Method(kComponent, "GetComponentInChildren", 2);
         A.mGetPos            = il::Method(kTransform, "get_position", 0);
         A.mGetFwd            = il::Method(kTransform, "get_forward", 0);
-        A.mRotate4           = il::Method(kTransform, "Rotate", 4);
+        A.mRotate4           = il::Method(kTransform, "Rotate", 4);      // Rotate(float x, float y, float z, Space)
         A.mW2S               = il::Method(kCamera, "WorldToScreenPoint", 1);
         A.mCamMain           = il::Method(kCamera, "get_main", 0);
         A.mScreenW           = il::Method(kScreen, "get_width", 0);
         A.mScreenH           = il::Method(kScreen, "get_height", 0);
-        A.mGetHeadBone       = il::Method(A.kSkel, "GetHeadBone", 0);
-        A.mTeam              = il::Method(A.kPlayer, "get_Team", 0);
-        A.mIsAlive           = il::Method(A.kPlayer, "get_IsAlive", 0);
-        A.mHealth            = il::Method(A.kPC, "get_Health", 0);
-        A.mLookXLimit        = il::Method(A.kPlayerLock, "get_LookXLimit", 0);
-        A.mGetVelocity       = il::Method(A.kRigidbody, "get_velocity", 0);
+        A.mGetHeadBone       = il::Method(A.kSkel, "GetHeadBone", 0);          // опционально
+        A.mTeam              = il::Method(A.kPlayer, "get_Team", 0);           // опционально
+        A.mIsAlive           = il::Method(A.kPlayer, "get_IsAlive", 0);        // опционально
+        A.mHealth            = il::Method(A.kPC, "get_Health", 0);             // опционально
+        A.mLookXLimit        = il::Method(A.kPlayerLock, "get_LookXLimit", 0); // опционально
+        A.mGetVelocity       = il::Method(A.kRigidbody, "get_velocity", 0);    // опционально, для prediction
 
         need(A.kPC, "PlayerController"); need(A.kSkel, "PlayerSkeleton"); need(A.kPlayerLock, "PlayerLock");
         need(A.mGetTransform, "Component.get_transform"); need(A.mGoGetTransform, "GameObject.get_transform");
@@ -169,20 +173,20 @@ namespace
         return PosOfTransform(tr, out);
     }
 
+    // Скорость объекта, только если его реальный класс — Rigidbody (проверено рантаймом, не на веру).
     bool VelocityOfRigidbody(void* obj, V3& out)
     {
         if (!A.mGetVelocity || !A.kRigidbody || !il::ValidPtr((uintptr_t)obj)) return false;
         void* cls = il::ClassOf(obj);
-        if (cls != A.kRigidbody) return false;
+        if (cls != A.kRigidbody) return false;   // не тот тип — не рискуем звать чужой метод
         out = il::InvokeBoxed<V3>(A.mGetVelocity, obj, nullptr);
         if (!Finite(out)) return false;
         float sp = std::sqrt(out.x * out.x + out.y * out.y + out.z * out.z);
         return sp <= Cfg::MaxSaneSpeed;
     }
 
-    // ============================================================
-    // SILENT AIM через Dobby + откат при ошибке
-    // ============================================================
+    // ---- Silent aim: хук ArmsController.FireRay(Vector3 camPos, Vector3 forward, float distance) ----
+    // RVA 0x124D1F4, dump.cs. Подменяем forward прямо перед вызовом оригинала, камеру не трогаем.
     namespace Silent
     {
         constexpr uintptr_t kFireRayRva = 0x124D1F4;
@@ -195,89 +199,39 @@ namespace
         };
         Target g_target;
 
+        // Сигнатура повторяет нативный вызов IL2CPP: this, Vector3 (HFA из 3 float) по значению,
+        // ещё один Vector3, float, и скрытый хвостовой MethodInfo* — его IL2CPP добавляет всем методам.
         using FireRay_t = void (*)(void* self, V3 camPos, V3 forward, float distance, void* methodInfo);
         FireRay_t g_orig = nullptr;
-        std::atomic<bool> g_hooked{false};
-        std::atomic<bool> g_origValid{false};
-        std::atomic<bool> g_installFailed{false};
-        std::atomic<int>  g_lastRc{0};
-        std::atomic<void*> g_targetAddr{nullptr};
-
-        static bool MakeWritable(void* addr, size_t size) {
-            vm_address_t page = (vm_address_t)addr & ~0xFFFULL;
-            vm_size_t len = ((vm_address_t)addr + size - page + 0xFFF) & ~0xFFFULL;
-            return vm_protect(mach_task_self(), page, len, false,
-                              VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) == KERN_SUCCESS;
-        }
-        static bool MakeExecutable(void* addr, size_t size) {
-            vm_address_t page = (vm_address_t)addr & ~0xFFFULL;
-            vm_size_t len = ((vm_address_t)addr + size - page + 0xFFF) & ~0xFFFULL;
-            return vm_protect(mach_task_self(), page, len, false,
-                              VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS;
-        }
-        static void FlushCache(void* addr, size_t size) {
-            sys_icache_invalidate(addr, size);
-        }
+        bool      g_hooked = false;
 
         void Fake(void* self, V3 camPos, V3 forward, float distance, void* methodInfo)
         {
-            if (aim::silent && g_target.valid.load(std::memory_order_relaxed)) {
-                double age = ImGui::GetTime() - g_target.updatedAt;
-                if (age >= 0.0 && age < Cfg::SilentTargetMaxAge) {
-                    V3 dir{ g_target.x - camPos.x, g_target.y - camPos.y, g_target.z - camPos.z };
-                    float len = std::sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z);
-                    if (len > 1e-4f) forward = V3{ dir.x / len, dir.y / len, dir.z / len };
-                }
-            }
-            if (g_origValid.load(std::memory_order_relaxed) && g_orig)
-                g_orig(self, camPos, forward, distance, methodInfo);
+            // ДИАГНОСТИКА: подмена направления временно отключена.
+            // Если крашит и так — дело не в этой логике, а в самом хуке (адрес/сигнатура/Dobby).
+            if (g_orig) g_orig(self, camPos, forward, distance, methodInfo);
         }
 
         bool Install()
         {
-            if (g_hooked.load(std::memory_order_relaxed)) return true;
-            if (g_installFailed.load(std::memory_order_relaxed)) return false;
+            if (g_hooked) return true;
             if (!il::Ready()) return false;
-
             void* base = il::ModuleBase();
-            if (!base) { g_installFailed.store(true); NSLog(@"[silent] ModuleBase null"); return false; }
+            if (!base) return false;
             void* target = (void*)((uintptr_t)base + kFireRayRva);
-            g_targetAddr.store(target);
-
-            uint32_t i0 = *(uint32_t*)target;
-            uint32_t i1 = *((uint32_t*)target + 1);
-            uint32_t i2 = *((uint32_t*)target + 2);
-            uint32_t i3 = *((uint32_t*)target + 3);
-            NSLog(@"[silent] FireRay target=%p insn=%08X %08X %08X %08X", target, i0, i1, i2, i3);
-
-            uint8_t backup[16];
-            memcpy(backup, target, 16);
-
-            if (!MakeWritable(target, 16)) {
-                NSLog(@"[silent] vm_protect(RW) failed — abort, no patch");
-                g_installFailed.store(true);
-                return false;
-            }
-
             int rc = DobbyHook(target, (void*)Fake, (void**)&g_orig);
-            g_lastRc.store(rc);
-
-            if (rc != 0 || !g_orig) {
-                NSLog(@"[silent] DobbyHook failed rc=%d orig=%p — restoring original bytes", rc, (void*)g_orig);
-                memcpy(target, backup, 16);
-                FlushCache(target, 16);
-                MakeExecutable(target, 16);
-                g_orig = nullptr;
-                g_origValid.store(false);
-                g_installFailed.store(true);
-                return false;
-            }
-
-            FlushCache(target, 16);
-            g_origValid.store(true);
-            g_hooked.store(true);
-            NSLog(@"[silent] FireRay hooked at %p, orig=%p", target, (void*)g_orig);
+            if (rc != 0) return false;
+            g_hooked = true;
             return true;
+        }
+
+        void Remove()
+        {
+            if (!g_hooked) return;
+            void* base = il::ModuleBase();
+            if (base) DobbyDestroy((void*)((uintptr_t)base + kFireRayRva));
+            g_hooked = false;
+            g_orig = nullptr;
         }
 
         void SetTarget(const V3& pos, double now)
@@ -289,9 +243,7 @@ namespace
         void Clear() { g_target.valid.store(false, std::memory_order_relaxed); }
     }
 
-    // ============================================================
-    // Цели
-    // ============================================================
+    // ---- Цели ----
     struct Cand { uintptr_t pc = 0, player = 0, skeleton = 0, headBone = 0; std::string team; };
 
     struct World
@@ -302,11 +254,13 @@ namespace
         std::string localTeam;
         double last = -1.0;
         int nPc = 0, nLocal = 0, nNoSkel = 0;
+
         uintptr_t lockedPc = 0;
         double    lostSince = -1.0;
         uintptr_t prevLock = 0;
-        double overrideUntil = -1.0;
-        float  lastCmdY = 0.f;
+
+        double overrideUntil = -1.0;   // до этого времени не пишем коррекцию — ты сам уводишь взгляд
+        float  lastCmdY = 0.f;         // сколько реальных градусов по яву мы сами скомандовали прошлым кадром
     } W;
 
     uintptr_t PickHeadBone(uintptr_t body)
@@ -314,7 +268,7 @@ namespace
         if (!A.mGetBones || !il::ValidPtr(body)) return 0;
         uintptr_t arr = (uintptr_t)il::Invoke(A.mGetBones, (void*)body, nullptr);
         if (!il::ValidPtr(arr)) return 0;
-        uint64_t len = il::Read<uint64_t>(arr + 0x18);
+        uint64_t len = il::Read<uint64_t>(arr + 0x18);     // Il2CppArray: max_length @0x18, data @0x20
         if (len == 0 || len > 512) return 0;
 
         uintptr_t best = 0; float bestY = -1e9f;
@@ -353,7 +307,7 @@ namespace
                 }
                 W.haveLocal = true;
                 W.localTeam = team;
-                continue;
+                continue;                                   // себя в цели не берём
             }
 
             bool inc = true;
@@ -390,6 +344,7 @@ namespace
     double g_nextRoll = 0.0;
     bool   g_rollHead = true;
 
+    // bone — указатель на объект, который дал позицию (если это реально Rigidbody, из него же берём скорость).
     bool AimPoint(const Cand& c, V3& out, void*& bone)
     {
         bone = nullptr;
@@ -422,11 +377,12 @@ namespace
         void* a[1] = { &p };
         V3 s = il::InvokeBoxed<V3>(A.mW2S, (void*)cam, a);
         if (!Finite(s) || s.z <= 0.f) return false;
-        out = ImVec2(s.x * sx, (screenH - s.y) * sy);
+        out = ImVec2(s.x * sx, (screenH - s.y) * sy);   // Unity: начало снизу-слева, ImGui: сверху-слева
         return true;
     }
 
-    struct Ang { float yaw, pitch; };
+    // ---- Углы ----
+    struct Ang { float yaw, pitch; };   // градусы; yaw = atan2(x, z), pitch > 0 = вверх
 
     bool FromDir(const V3& d, Ang& out)
     {
@@ -438,11 +394,13 @@ namespace
     }
     float Wrap(float a) { while (a > 180.f) a -= 360.f; while (a < -180.f) a += 360.f; return a; }
 
+    // Диагностика корреляции (только для статуса, в управление НЕ идёт — Transform.Rotate и rotationX
+    // уже в реальных градусах, калибровка здесь лишняя и была источником перекручивания).
     struct Diag
     {
         float lastY = 0.f, lastP = 0.f;
         bool  have = false;
-        float corrY = 0.f, corrP = 0.f;
+        float corrY = 0.f, corrP = 0.f;   // последняя измеренная "реальный угол / команда", только для чтения
         void  Reset() { have = false; }
     } D;
 
@@ -455,14 +413,14 @@ namespace
 
     void AimbotFrame(ImDrawList* dl, ImVec2 center)
     {
-        char st[400];
+        char st[360];
         if (!ResolveApi()) { std::snprintf(st, sizeof st, "AIM: missing %s", A.missing.c_str()); Status(dl, st); return; }
 
         double now = ImGui::GetTime();
         if (W.last < 0.0 || now - W.last >= Cfg::RefreshInterval) {
             W.last = now;
             Refresh();
-            if (W.lock != W.prevLock) {
+            if (W.lock != W.prevLock) {           // новый матч/респавн локального игрока
                 D.Reset();
                 W.lockedPc = 0; W.lostSince = -1.0; W.overrideUntil = -1.0; W.lastCmdY = 0.f;
                 W.prevLock = W.lock;
@@ -476,7 +434,8 @@ namespace
             if (il::ValidPtr((uintptr_t)c)) cam = (uintptr_t)c;
         }
         if (!il::ValidPtr(cam) || !il::ValidPtr(W.lock) || !il::ValidPtr(W.body)) {
-            std::snprintf(st, sizeof st, "AIM: no local view");
+            std::snprintf(st, sizeof st, "AIM: no local view (pc=%d loc=%d cam=%d lock=%d body=%d)",
+                          W.nPc, W.nLocal, il::ValidPtr(cam), il::ValidPtr(W.lock), il::ValidPtr(W.body));
             Status(dl, st);
             D.Reset(); W.lockedPc = 0; W.lostSince = -1.0; W.overrideUntil = -1.0;
             Silent::Clear();
@@ -500,20 +459,22 @@ namespace
         float fp = il::Read<float>(W.lock + Cfg::PL_RotationX);
         if (!std::isfinite(fp)) return;
 
+        // Детектор "сам резко увёл взгляд": сравниваем реальное изменение яв за кадр с тем, что скомандовали мы сами.
         bool overriding = false;
         if (D.have) {
             float realDY = Wrap(cur.yaw - D.lastY);
             float userDY = realDY - W.lastCmdY;
             if (std::fabs(userDY) > Cfg::OverrideYawDegPerFrame) {
                 W.overrideUntil = now + Cfg::OverrideHoldSec;
-                W.lockedPc = 0;
+                W.lockedPc = 0;        // сразу отпускаем старую цель, дальше выбор пойдёт заново
                 W.lostSince = -1.0;
             }
-            if (std::fabs(realDY) > 1e-6f) D.corrY = userDY / realDY;
+            if (std::fabs(realDY) > 1e-6f) D.corrY = userDY / realDY;   // чисто для статуса
         }
         overriding = now < W.overrideUntil;
         D.lastY = cur.yaw; D.lastP = cur.pitch; D.have = true;
 
+        // Выбор цели: сначала пробуем удержать уже выбранную, чтобы не дёргаться на границе FOV.
         auto qualifies = [&](const Cand& c, ImVec2& s, float& d) -> bool {
             if (W.haveLocal && !W.localTeam.empty() && c.team == W.localTeam) return false;
             if (IsDead(c)) return false;
@@ -542,6 +503,7 @@ namespace
                 break;
             }
             if (!best && W.lostSince >= 0.0 && now - W.lostSince < Cfg::LoseGraceSec) {
+                // в пределах льготного времени просто не трогаем прицел в этом кадре
             } else if (!best) {
                 W.lockedPc = 0;
                 W.lostSince = -1.0;
@@ -579,6 +541,7 @@ namespace
             V3 dir{ bestPos.x - eye.x, bestPos.y - eye.y, bestPos.z - eye.z };
             if (FromDir(dir, des)) {
                 if (aim::silent) {
+                    // Камеру не трогаем — только отдаём точку прицеливания хуку FireRay.
                     Silent::SetTarget(bestPos, now);
                     eY = Wrap(des.yaw - cur.yaw);
                     eP = des.pitch - cur.pitch;
@@ -592,12 +555,12 @@ namespace
                     float alpha = (s <= 1.f) ? 1.f : 1.f - std::pow(1.f - 1.f / s, dt * 60.f);
 
                     float maxStep = Cfg::MaxDegPerSec * dt;
-                    float dY  = std::clamp(eY * alpha, -maxStep, maxStep);
-                    float dFp = -std::clamp(eP * alpha, -maxStep, maxStep);
+                    float dY  = std::clamp(eY * alpha, -maxStep, maxStep);    // реальные градусы, Rotate их и ждёт
+                    float dFp = -std::clamp(eP * alpha, -maxStep, maxStep);   // минус: +X в Unity крутит камеру вниз
 
                     if (std::isfinite(dY) && std::isfinite(dFp) && (std::fabs(eY) > 0.05f || std::fabs(eP) > 0.05f)) {
                         float x = 0.f, y = dY, z = 0.f;
-                        int space = 0;
+                        int space = 0;                          // Space.World
                         void* a[4] = { &x, &y, &z, &space };
                         il::Invoke(A.mRotate4, bodyTr, a);
 
@@ -618,13 +581,10 @@ namespace
         W.lastCmdY = cmdY;
 
         std::snprintf(st, sizeof st,
-            "AIM pc=%d cand=%d fov=%d tgt=%d sil=%d hooked=%d rc=%d orig=%p | %s",
-            W.nPc, (int)W.cands.size(), inFov, best ? 1 : 0,
-            (int)aim::silent, (int)Silent::g_hooked.load(),
-            Silent::g_lastRc.load(), (void*)Silent::g_orig,
-            aim::silent ? (Silent::g_hooked.load() ? "SILENT-ON" :
-                          (Silent::g_installFailed.load() ? "HOOK-FAIL" : "HOOK-PENDING"))
-                        : (wrote ? "writing" : "idle"));
+            "AIM pc=%d loc=%d cand=%d fov=%d hid=%d tgt=%d lock=%d ovr=%d pred=%d sil=%d hook=%d | eY=%.1f eP=%.1f %s",
+            W.nPc, W.nLocal, (int)W.cands.size(), inFov, hid, best ? 1 : 0, (int)(W.lockedPc != 0),
+            overriding ? 1 : 0, predicted ? 1 : 0, (int)aim::silent, (int)Silent::g_hooked,
+            eY, eP, overriding ? "OVERRIDE" : (aim::silent ? "silent" : (wrote ? "writing" : "idle")));
         Status(dl, st);
     }
 }
@@ -632,17 +592,14 @@ namespace
 void aim::run()
 {
     if (!il::Init()) return;
-
-    // Ставим хук ТОЛЬКО когда silent включён и il2cpp готов
-    if (aim::silent && !Silent::g_hooked.load() && !Silent::g_installFailed.load())
-        Silent::Install();
+    Silent::Install();   // один раз, безопасно вызывать каждый кадр — внутри своя защита от повторной установки
 
     ImDrawList* draw = ImGui::GetBackgroundDrawList();
     float screenWidth  = ImGui::GetIO().DisplaySize.x;
     float screenHeight = ImGui::GetIO().DisplaySize.y;
     ImVec2 center(screenWidth / 2.0f, screenHeight / 2.0f);
 
-    if (aim::aimbot || aim::silent) {
+    if (aim::aimbot) {
         AimbotFrame(draw, center);
     } else {
         D.Reset();
