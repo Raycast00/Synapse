@@ -24,7 +24,6 @@ namespace
         constexpr uintptr_t PC_IsRagdolling = 0x49;
         constexpr uintptr_t PC_MainCamera   = 0x30;
         constexpr uintptr_t PC_PlayerLock   = 0x68;
-        constexpr uintptr_t PC_Movement     = 0x40;  // PlayerController._movementController
         constexpr uintptr_t PC_Player       = 0x90;
         constexpr uintptr_t PC_IsDeath      = 0xA8;
         constexpr uintptr_t PC_HiddenMask   = 0xC4;
@@ -49,22 +48,17 @@ namespace
         constexpr double OverrideHoldSec        = 0.25;
         constexpr float  PredictLeadSec  = 0.12f;
         constexpr float  MaxSaneSpeed    = 15.f;
-
-        // Crouch correction
-        constexpr float StandHeadHeight  = 1.75f;   // столько метров от ног до головы в стойке
-        constexpr float DefaultCrouchRatio = 0.70f;  // fallback: присед = 70% от стойки
     }
 
     struct Api
     {
         bool ready = false;
         std::string missing;
-        void *kPC{}, *kPlayer{}, *kSkel{}, *kPlayerLock{}, *kRigidbody{}, *kMovement{};
+        void *kPC{}, *kPlayer{}, *kSkel{}, *kPlayerLock{}, *kRigidbody{};
         void *mGetTransform{}, *mGoGetTransform{}, *mGetCompInChildren{}, *mGetPos{}, *mGetFwd{}, *mRotate4{};
         void *mW2S{}, *mCamMain{}, *mScreenW{}, *mScreenH{}, *mGetHeadBone{};
         void *mTeam{}, *mIsAlive{}, *mHealth{}, *mLookXLimit{}, *mGetVelocity{};
         void *kSMR{}, *mGetBones{};
-        void *mGetDuckAmount{}, *mGetCrouchRatio{};
     } A;
 
     bool ResolveApi()
@@ -77,7 +71,6 @@ namespace
         A.kPC         = il::Class("", "PlayerController", "Assembly-CSharp");
         A.kSkel       = il::Class("ScarletWork.Game", "PlayerSkeleton", "Assembly-CSharp");
         A.kPlayerLock = il::Class("ScarletWork.Game", "PlayerLock", "Assembly-CSharp");
-        A.kMovement   = il::Class("", "PlayerMovement", "Assembly-CSharp");
         A.kPlayer     = il::Class("Photon.Realtime", "Player", "PhotonRealtime");
         A.kRigidbody  = il::Class("UnityEngine", "Rigidbody", "UnityEngine.PhysicsModule");
         A.kSMR        = il::Class("UnityEngine", "SkinnedMeshRenderer", core);
@@ -105,9 +98,6 @@ namespace
         A.mHealth            = il::Method(A.kPC, "get_Health", 0);
         A.mLookXLimit        = il::Method(A.kPlayerLock, "get_LookXLimit", 0);
         A.mGetVelocity       = il::Method(A.kRigidbody, "get_velocity", 0);
-
-        A.mGetDuckAmount     = il::Method(A.kMovement, "get_DuckAmount", 0);
-        A.mGetCrouchRatio    = il::Method(A.kMovement, "get_CrouchCameraRatio", 0);
 
         need(A.kPC, "PlayerController"); need(A.kSkel, "PlayerSkeleton"); need(A.kPlayerLock, "PlayerLock");
         need(A.mGetTransform, "Component.get_transform"); need(A.mGoGetTransform, "GameObject.get_transform");
@@ -179,35 +169,6 @@ namespace
         if (!Finite(out)) return false;
         float sp = std::sqrt(out.x * out.x + out.y * out.y + out.z * out.z);
         return sp <= Cfg::MaxSaneSpeed;
-    }
-
-    // ---- Приседает ли цель? Возвращает 0..1 (0 = стоит, 1 = полный присед) ----
-    float ReadDuckAmount(uintptr_t pc)
-    {
-        if (!A.mGetDuckAmount) return 0.0f;
-        uintptr_t movement = il::Read<uintptr_t>(pc + Cfg::PC_Movement);
-        if (!il::ValidPtr(movement)) return 0.0f;
-        float d = 0.0f;
-        if (!CallFloat(A.mGetDuckAmount, (void*)movement, d)) return 0.0f;
-        if (!std::isfinite(d)) return 0.0f;
-        return std::clamp(d, 0.0f, 1.2f);
-    }
-
-    // ---- Насколько метрически опускается голова относительно стойки ----
-    float ReadCrouchOffset(uintptr_t pc, float duck)
-    {
-        if (duck < 0.02f) return 0.0f;
-        float ratio = Cfg::DefaultCrouchRatio;
-        if (A.mGetCrouchRatio) {
-            uintptr_t movement = il::Read<uintptr_t>(pc + Cfg::PC_Movement);
-            if (il::ValidPtr(movement)) {
-                float r = 0.0f;
-                if (CallFloat(A.mGetCrouchRatio, (void*)movement, r) && std::isfinite(r) && r > 0.1f && r < 1.0f)
-                    ratio = r;
-            }
-        }
-        float fullOffset = Cfg::StandHeadHeight * (1.0f - ratio);
-        return fullOffset * std::clamp(duck, 0.0f, 1.0f);
     }
 
     struct Cand
@@ -315,7 +276,6 @@ namespace
     double g_nextRoll = 0.0;
     bool   g_rollHead = true;
 
-    // bone возвращается для prediction. out корректируется на присед.
     bool AimPoint(const Cand& c, V3& out, void*& bone)
     {
         bone = nullptr;
@@ -339,19 +299,7 @@ namespace
 
         int mode = aim::current_aimbot_hitbox;
         bool wantHead = (mode == 0) || (mode == 2 && g_rollHead);
-        bool ok = wantHead ? (head() || chest()) : (chest() || head());
-        if (!ok) return false;
-
-        // ---- КОРРЕКЦИЯ ПРИСЕДА ----
-        // Кости не всегда следуют за приседом (IK/LateUpdate/шейдер). Читаем _duckAmount
-        // у PlayerMovement и опускаем точку прицела вручную.
-        float duck = ReadDuckAmount(c.pc);
-        if (duck > 0.02f) {
-            float offset = ReadCrouchOffset(c.pc, duck);
-            out.y -= offset;
-        }
-
-        return true;
+        return wantHead ? (head() || chest()) : (chest() || head());
     }
 
     bool W2S(uintptr_t cam, const V3& w, float sx, float sy, float screenH, ImVec2& out)
@@ -452,6 +400,7 @@ namespace
         overriding = now < W.overrideUntil;
         D.lastY = cur.yaw; D.lastP = cur.pitch; D.have = true;
 
+        // Финальная проверка цели: команда, смерть, скрыт раундом/спектатором, попадание в FOV
         auto qualifies = [&](const Cand& c, ImVec2& s, float& d, V3& hitPos, void*& bone) -> bool {
             if (W.haveLocal && !W.localTeam.empty() && c.team == W.localTeam) return false;
             if (IsDead(c)) return false;
