@@ -220,21 +220,23 @@ static bool   g_tLeave = false;
                     ImGui::Checkbox("Silent", &aim::silent);
                 }
                 ImGui::Checkbox("Automatic Fire", &aim::automatic_fire);
-                ImGui::Checkbox("Aim Through Walls", &aim::aim_through_walls);
                 ImGui::Checkbox("Prediction", &aim::aimbot_prediction);
-                ImGui::Checkbox("Visiblity Check", &aim::aimbot_visiblity_check);
 
                 ImGui::Checkbox("Draw FOV", &aim::draw_fov);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## FOV Color", aim::fov_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
                 ImGui::SliderFloat("Field of View", &aim::fov_radius, 30.f, 180.f, "%.0f");
-                //hi
-                ImGui::SliderFloat("Smoothing", &aim::aimbot_smoothing, 0.f, 100.f, "%.0f%%");
 
+                ImGui::SliderFloat("Smoothing", &aim::aimbot_smoothing, 0.f, 100.f, "%.0f%%");
                 ImGui::Combo("Hitboxes", &aim::current_aimbot_hitbox, aim::aimbot_hitboxes, IM_ARRAYSIZE(aim::aimbot_hitboxes));
                 
                 ImGui::Checkbox("RCS", &aim::RCS);
 
+                // OTHER
+                ImGui::SeparatorText("Other");
+                ImGui::Checkbox("Visualize", &aim::aim_visualize_bullet);
+
+                // ANTI AIM
                 ImGui::SeparatorText("Anti Aim");
 
                 ImGui::Checkbox("Enabled", &aim::anti_aim);

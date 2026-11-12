@@ -7,9 +7,6 @@ namespace aim
     inline bool anti_aim = false;
 
     inline bool automatic_fire = false;
-    inline bool aim_through_walls = false;
-    inline bool aimbot_prediction = false;
-    inline bool aimbot_visiblity_check = false;
 
     inline bool draw_fov = false;
     inline float fov_radius = 30.f;
@@ -22,6 +19,9 @@ namespace aim
 
     inline int current_aimbot_hitbox = 0;
     inline const char* aimbot_hitboxes[] = { "Head", "Chest", "Random" };
+
+    // Other
+    inline int aim_visualize_bullet = 0;
 
     // Weapon
     inline bool RCS = false;

@@ -24,6 +24,7 @@ namespace
         constexpr uintptr_t PC_IsRagdolling = 0x49;
         constexpr uintptr_t PC_MainCamera   = 0x30;
         constexpr uintptr_t PC_PlayerLock   = 0x68;
+        constexpr uintptr_t PC_Movement     = 0x40;  // PlayerController._movementController
         constexpr uintptr_t PC_Player       = 0x90;
         constexpr uintptr_t PC_IsDeath      = 0xA8;
         constexpr uintptr_t PC_HiddenMask   = 0xC4;
@@ -49,21 +50,21 @@ namespace
         constexpr float  PredictLeadSec  = 0.12f;
         constexpr float  MaxSaneSpeed    = 15.f;
 
-        // visibility raycast
-        constexpr float  VisShrinkMeters = 0.5f;   // сдвиг точки назначения, чтобы не попасть в коллайдер цели
-        constexpr int    VisLayerMask    = -5;     // DefaultRaycastLayers: всё кроме IgnoreRaycast
+        // Crouch correction
+        constexpr float StandHeadHeight  = 1.75f;   // столько метров от ног до головы в стойке
+        constexpr float DefaultCrouchRatio = 0.70f;  // fallback: присед = 70% от стойки
     }
 
     struct Api
     {
         bool ready = false;
         std::string missing;
-        void *kPC{}, *kPlayer{}, *kSkel{}, *kPlayerLock{}, *kRigidbody{}, *kPhysics{};
+        void *kPC{}, *kPlayer{}, *kSkel{}, *kPlayerLock{}, *kRigidbody{}, *kMovement{};
         void *mGetTransform{}, *mGoGetTransform{}, *mGetCompInChildren{}, *mGetPos{}, *mGetFwd{}, *mRotate4{};
         void *mW2S{}, *mCamMain{}, *mScreenW{}, *mScreenH{}, *mGetHeadBone{};
         void *mTeam{}, *mIsAlive{}, *mHealth{}, *mLookXLimit{}, *mGetVelocity{};
         void *kSMR{}, *mGetBones{};
-        void *mLinecast2{};
+        void *mGetDuckAmount{}, *mGetCrouchRatio{};
     } A;
 
     bool ResolveApi()
@@ -76,9 +77,9 @@ namespace
         A.kPC         = il::Class("", "PlayerController", "Assembly-CSharp");
         A.kSkel       = il::Class("ScarletWork.Game", "PlayerSkeleton", "Assembly-CSharp");
         A.kPlayerLock = il::Class("ScarletWork.Game", "PlayerLock", "Assembly-CSharp");
+        A.kMovement   = il::Class("", "PlayerMovement", "Assembly-CSharp");
         A.kPlayer     = il::Class("Photon.Realtime", "Player", "PhotonRealtime");
         A.kRigidbody  = il::Class("UnityEngine", "Rigidbody", "UnityEngine.PhysicsModule");
-        A.kPhysics    = il::Class("UnityEngine", "Physics", "UnityEngine.PhysicsModule");
         A.kSMR        = il::Class("UnityEngine", "SkinnedMeshRenderer", core);
         A.mGetBones   = il::Method(A.kSMR, "get_bones", 0);
 
@@ -105,8 +106,8 @@ namespace
         A.mLookXLimit        = il::Method(A.kPlayerLock, "get_LookXLimit", 0);
         A.mGetVelocity       = il::Method(A.kRigidbody, "get_velocity", 0);
 
-        // Physics.Linecast(Vector3 start, Vector3 end) -> bool (без out, без маски)
-        A.mLinecast2         = il::Method(A.kPhysics, "Linecast", 2);
+        A.mGetDuckAmount     = il::Method(A.kMovement, "get_DuckAmount", 0);
+        A.mGetCrouchRatio    = il::Method(A.kMovement, "get_CrouchCameraRatio", 0);
 
         need(A.kPC, "PlayerController"); need(A.kSkel, "PlayerSkeleton"); need(A.kPlayerLock, "PlayerLock");
         need(A.mGetTransform, "Component.get_transform"); need(A.mGoGetTransform, "GameObject.get_transform");
@@ -169,13 +170,6 @@ namespace
         return PosOfTransform(tr, out);
     }
 
-    V3 WorldPos(void* component)
-    {
-        V3 out{};
-        PosOfComponent(component, out);
-        return out;
-    }
-
     bool VelocityOfRigidbody(void* obj, V3& out)
     {
         if (!A.mGetVelocity || !A.kRigidbody || !il::ValidPtr((uintptr_t)obj)) return false;
@@ -187,42 +181,39 @@ namespace
         return sp <= Cfg::MaxSaneSpeed;
     }
 
-    // ---- Настоящая проверка видимости через Physics.Linecast ----
-    // Возвращает true если между eye и target **есть стена/препятствие**.
-    // Конечную точку сдвигаем на VisShrinkMeters, чтобы не попасть в коллайдер самой цели.
-    static bool RayBlocked(const V3& eye, const V3& target, float shrink)
+    // ---- Приседает ли цель? Возвращает 0..1 (0 = стоит, 1 = полный присед) ----
+    float ReadDuckAmount(uintptr_t pc)
     {
-        if (!A.mLinecast2) return false;
-        V3 d = { target.x - eye.x, target.y - eye.y, target.z - eye.z };
-        float dist2 = d.x*d.x + d.y*d.y + d.z*d.z;
-        if (dist2 < 1.0f) return false;   // ближе 1 м — считаем видимым
-        float dist = std::sqrt(dist2);
-        float eff  = dist - shrink;
-        if (eff <= 0.1f) return false;
-        float k = eff / dist;
-
-        V3 start = eye;
-        V3 end   = { eye.x + d.x * k, eye.y + d.y * k, eye.z + d.z * k };
-
-        void* args[2] = { &start, &end };
-        void* r = il::Invoke(A.mLinecast2, nullptr, args);
-        if (!il::ValidPtr((uintptr_t)r)) return false;
-        return *((bool*)((uint8_t*)r + 0x10));
+        if (!A.mGetDuckAmount) return 0.0f;
+        uintptr_t movement = il::Read<uintptr_t>(pc + Cfg::PC_Movement);
+        if (!il::ValidPtr(movement)) return 0.0f;
+        float d = 0.0f;
+        if (!CallFloat(A.mGetDuckAmount, (void*)movement, d)) return 0.0f;
+        if (!std::isfinite(d)) return 0.0f;
+        return std::clamp(d, 0.0f, 1.2f);
     }
 
-    // Цель видима, если луч к голове ИЛИ к ногам не перекрыт стеной.
-    static bool EnemyVisible(const V3& eye, const V3& headPos, const V3& feetPos)
+    // ---- Насколько метрически опускается голова относительно стойки ----
+    float ReadCrouchOffset(uintptr_t pc, float duck)
     {
-        bool headBlocked = RayBlocked(eye, headPos, Cfg::VisShrinkMeters);
-        bool feetBlocked = RayBlocked(eye, feetPos, Cfg::VisShrinkMeters);
-        return !(headBlocked && feetBlocked);
+        if (duck < 0.02f) return 0.0f;
+        float ratio = Cfg::DefaultCrouchRatio;
+        if (A.mGetCrouchRatio) {
+            uintptr_t movement = il::Read<uintptr_t>(pc + Cfg::PC_Movement);
+            if (il::ValidPtr(movement)) {
+                float r = 0.0f;
+                if (CallFloat(A.mGetCrouchRatio, (void*)movement, r) && std::isfinite(r) && r > 0.1f && r < 1.0f)
+                    ratio = r;
+            }
+        }
+        float fullOffset = Cfg::StandHeadHeight * (1.0f - ratio);
+        return fullOffset * std::clamp(duck, 0.0f, 1.0f);
     }
 
     struct Cand
     {
         uintptr_t pc = 0, player = 0, skeleton = 0, headBone = 0;
         std::string team;
-        V3 feet{};        // позиция PlayerController (ноги/центр)
     };
 
     struct World
@@ -301,7 +292,6 @@ namespace
             c.skeleton = sk;
             c.headBone = hb;
             c.team = team;
-            c.feet = WorldPos((void*)pc);
             W.cands.push_back(std::move(c));
         }
     }
@@ -325,6 +315,7 @@ namespace
     double g_nextRoll = 0.0;
     bool   g_rollHead = true;
 
+    // bone возвращается для prediction. out корректируется на присед.
     bool AimPoint(const Cand& c, V3& out, void*& bone)
     {
         bone = nullptr;
@@ -348,7 +339,19 @@ namespace
 
         int mode = aim::current_aimbot_hitbox;
         bool wantHead = (mode == 0) || (mode == 2 && g_rollHead);
-        return wantHead ? (head() || chest()) : (chest() || head());
+        bool ok = wantHead ? (head() || chest()) : (chest() || head());
+        if (!ok) return false;
+
+        // ---- КОРРЕКЦИЯ ПРИСЕДА ----
+        // Кости не всегда следуют за приседом (IK/LateUpdate/шейдер). Читаем _duckAmount
+        // у PlayerMovement и опускаем точку прицела вручную.
+        float duck = ReadDuckAmount(c.pc);
+        if (duck > 0.02f) {
+            float offset = ReadCrouchOffset(c.pc, duck);
+            out.y -= offset;
+        }
+
+        return true;
     }
 
     bool W2S(uintptr_t cam, const V3& w, float sx, float sy, float screenH, ImVec2& out)
@@ -390,7 +393,7 @@ namespace
 
     void AimbotFrame(ImDrawList* dl, ImVec2 center)
     {
-        char st[420];
+        char st[380];
         if (!ResolveApi()) { std::snprintf(st, sizeof st, "AIM: missing %s", A.missing.c_str()); Status(dl, ImVec2(10,113), st); return; }
 
         double now = ImGui::GetTime();
@@ -449,11 +452,7 @@ namespace
         overriding = now < W.overrideUntil;
         D.lastY = cur.yaw; D.lastP = cur.pitch; D.have = true;
 
-        // Требование видимости: явный флаг ИЛИ (aim_through_walls = false)
-        const bool requireVisible = aim::aimbot_visiblity_check || !aim::aim_through_walls;
-
-        // Простая проверка (без raycast): команда, смерть, всегда-скрыт, FOV
-        auto qualifiesBasic = [&](const Cand& c, ImVec2& s, float& d, V3& hitPos, void*& bone) -> bool {
+        auto qualifies = [&](const Cand& c, ImVec2& s, float& d, V3& hitPos, void*& bone) -> bool {
             if (W.haveLocal && !W.localTeam.empty() && c.team == W.localTeam) return false;
             if (IsDead(c)) return false;
             if (IsAlwaysHidden(c)) return false;
@@ -463,17 +462,9 @@ namespace
             return true;
         };
 
-        // Полная проверка: basic + raycast visibility (если нужно)
-        auto qualifies = [&](const Cand& c, ImVec2& s, float& d, V3& hitPos, void*& bone) -> bool {
-            if (!qualifiesBasic(c, s, d, hitPos, bone)) return false;
-            if (requireVisible && !EnemyVisible(eye, hitPos, c.feet)) return false;
-            return true;
-        };
-
         const Cand* best = nullptr; V3 bestPos{}; void* bestBone = nullptr;
-        int inFov = 0, hid = 0, vis = 0;
+        int inFov = 0;
 
-        // Сначала пробуем удержать залоченную цель (проверяем сразу с видимостью)
         if (W.lockedPc) {
             for (const Cand& c : W.cands) {
                 if (c.pc != W.lockedPc) continue;
@@ -487,25 +478,20 @@ namespace
                 break;
             }
             if (!best && W.lostSince >= 0.0 && now - W.lostSince < Cfg::LoseGraceSec) {
-                // grace period — не трогаем
+                // grace period
             } else if (!best) {
                 W.lockedPc = 0;
                 W.lostSince = -1.0;
             }
         }
 
-        // Поиск новой цели — предпочитаем видимых
         for (const Cand& c : W.cands) {
             if (c.pc == W.lockedPc) continue;
 
             ImVec2 s; float d; V3 hitPos; void* bone;
-            if (!qualifiesBasic(c, s, d, hitPos, bone)) continue;
+            if (!qualifies(c, s, d, hitPos, bone)) continue;
             if (d >= aim::fov_radius) continue;
             inFov++;
-
-            bool blocked = requireVisible && !EnemyVisible(eye, hitPos, c.feet);
-            if (blocked) { hid++; continue; }
-            vis++;
 
             if (!best) {
                 best = &c;
@@ -563,9 +549,9 @@ namespace
         W.lastCmdY = cmdY;
 
         std::snprintf(st, sizeof st,
-            "AIM pc=%d cand=%d fov=%d vis=%d hid=%d tgt=%d lock=%d ovr=%d pred=%d rc=%d | eY=%.1f eP=%.1f %s",
-            W.nPc, (int)W.cands.size(), inFov, vis, hid, best ? 1 : 0, (int)(W.lockedPc != 0),
-            overriding ? 1 : 0, predicted ? 1 : 0, (int)(A.mLinecast2 != nullptr),
+            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d pred=%d | eY=%.1f eP=%.1f %s",
+            W.nPc, (int)W.cands.size(), inFov, best ? 1 : 0, (int)(W.lockedPc != 0),
+            overriding ? 1 : 0, predicted ? 1 : 0,
             eY, eP,
             overriding ? "OVERRIDE" : (wrote ? "writing" : "idle"));
         Status(dl, ImVec2(10,113), st);
