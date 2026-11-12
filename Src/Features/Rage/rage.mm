@@ -6,6 +6,8 @@
 #include "imgui.h"
 #include <cstdio>
 
+#include "Dobby/include/dobby.h"
+
 using IL2CPP::Read;
 using IL2CPP::Write;
 using IL2CPP::ValidPtr;
@@ -66,6 +68,38 @@ namespace off {
 
     constexpr uintptr_t gc_FriendlyFire = 0x20;   // private bool _friendlyFire
     constexpr uintptr_t gc_RoundsToWin  = 0x94;   // <RoundsToWin>k__BackingField
+}
+
+// ---- Wallbang: хук BulletPenetration.Opaque(in BulletSurface surface) ----
+// RVA 0x138DD5C, dump.cs. Метод static (нет this), параметр in — указатель на BulletSurface.
+// Возвращаем false вместо оригинала => CastPenetration никогда не считает поверхность непрозрачной,
+// при этом Loss()/Falloff() у игры остаются свои — падение урона через стены настоящее, не выдуманное.
+namespace Wallbang
+{
+    constexpr uintptr_t kOpaqueRva = 0x138DD5C;
+
+    using Opaque_t = bool (*)(const void* surface, void* methodInfo);
+    Opaque_t g_orig = nullptr;
+    bool     g_hooked = false;
+
+    bool Fake(const void* surface, void* methodInfo)
+    {
+        if (rage::wallbang) return false;
+        return g_orig ? g_orig(surface, methodInfo) : false;
+    }
+
+    bool Install()
+    {
+        if (g_hooked) return true;
+        if (!IL2CPP::Ready()) return false;
+        void* base = IL2CPP::ModuleBase();
+        if (!base) return false;
+        void* target = (void*)((uintptr_t)base + kOpaqueRva);
+        int rc = DobbyHook(target, (void*)Fake, (void**)&g_orig);
+        if (rc != 0) return false;
+        g_hooked = true;
+        return true;
+    }
 }
 
 struct Orig {
@@ -191,7 +225,7 @@ static void applyNoFallDamage()
     if (!ok(pc)) return;
     uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement);
     if (!ok(mv)) return;
-    
+
     Write<float>(mv + 0xB8, 0.0f);
     Write<float>(mv + 0xB4, 0.0f);
 }
@@ -199,19 +233,19 @@ static void applyNoFallDamage()
 static void drawStatus(bool ilReady)
 {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
-    char l1[200], l2[200];
+    char l1[200], l2[200], l3[160];
 
     if (!ilReady) {
         std::snprintf(l1, sizeof l1, "RAGE: IL2CPP not ready");
-        l2[0] = 0;
+        l2[0] = 0; l3[0] = 0;
     } else {
         uintptr_t pc   = localPlayerController();
         uintptr_t arms = ok(pc) ? Read<uintptr_t>(pc + off::pcArms) : 0;
         uintptr_t mv   = ok(pc) ? Read<uintptr_t>(pc + off::pcMovement) : 0;
 
         std::snprintf(l1, sizeof l1,
-            "RAGE tog: ammo=%d rate=%d mbt=%d rec=%d spr=%d | pc=%d arms=%d mv=%d wpn=%d cam=%d",
-            rage::infinity_ammo, rage::rapid_fire, rage::MBT, rage::no_recoil, rage::no_spread,
+            "RAGE tog: ammo=%d rate=%d mbt=%d rec=%d spr=%d wb=%d | pc=%d arms=%d mv=%d wpn=%d cam=%d",
+            rage::infinity_ammo, rage::rapid_fire, rage::MBT, rage::no_recoil, rage::no_spread, rage::wallbang,
             ok(pc), ok(arms), ok(mv), (int)g_weapons.size(), ok(fpsCamera()));
 
         std::snprintf(l2, sizeof l2, "RAGE val: mag=%d res=%d timeFired=%.2f freezing=%d grounded=%d",
@@ -220,6 +254,8 @@ static void drawStatus(bool ilReady)
             ok(arms) ? Read<float>(arms + off::arms_TimeFired) : -1.f,
             ok(mv) ? (int)Read<uint8_t>(mv + off::pm_IsFreezing) : -1,
             ok(mv) ? (int)Read<uint8_t>(mv + off::pm_IsGrounded) : -1);
+
+        std::snprintf(l3, sizeof l3, "RAGE wb: hook=%d", (int)Wallbang::g_hooked);
     }
     dl->AddText(ImVec2(11, 81), IM_COL32(0, 0, 0, 255), l1);
     dl->AddText(ImVec2(10, 80), IM_COL32(0, 255, 255, 255), l1);
@@ -227,11 +263,16 @@ static void drawStatus(bool ilReady)
         dl->AddText(ImVec2(11, 97), IM_COL32(0, 0, 0, 255), l2);
         dl->AddText(ImVec2(10, 96), IM_COL32(0, 255, 255, 255), l2);
     }
+    if (l3[0]) {
+        dl->AddText(ImVec2(11, 113), IM_COL32(0, 0, 0, 255), l3);
+        dl->AddText(ImVec2(10, 112), IM_COL32(0, 255, 255, 255), l3);
+    }
 }
 
 void rage::run()
 {
     bool ilReady = IL2CPP::Init();
+    if (ilReady) Wallbang::Install();   // один раз, безопасно каждый кадр — внутри своя защита от повтора
     drawStatus(ilReady);
     if (!ilReady) return;
 
