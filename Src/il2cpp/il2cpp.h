@@ -8,6 +8,7 @@ namespace IL2CPP {
     bool Ready();
 
     void* Domain();
+    void* ModuleBase();
     void* Image(const char* assemblyName = "Assembly-CSharp");
 
     void* Class(const char* ns, const char* name, const char* assemblyName = "Assembly-CSharp");

@@ -43,6 +43,14 @@ static std::unordered_map<void*, void*>       s_typeCache;
 
 bool  Ready()  { return s_ready; }
 void* Domain() { return s_domain; }
+void* ModuleBase()
+{
+    if (!s_domain_get) return nullptr;
+    Dl_info info{};
+    if (dladdr((void*)s_domain_get, &info) && info.dli_fbase)
+        return info.dli_fbase;
+    return nullptr;
+}
 
 bool ValidPtr(uintptr_t addr)
 {
