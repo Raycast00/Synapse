@@ -185,6 +185,38 @@ namespace
         return sp <= Cfg::MaxSaneSpeed;
     }
 
+    // ---- ModuleCheck: проверка ModuleBase() и формулы "RVA из dump.cs = база + смещение" БЕЗ единого хука.
+    // Берём настоящий нативный адрес уже резолвленного и рабочего метода (get_Health, его каждый кадр
+    // вызывает ESP через обычный IL2CPP::Invoke) и сравниваем с тем, что даёт наша формула.
+    namespace ModuleCheck
+    {
+        bool      done = false;
+        bool      match = false;
+        bool      plausible = false;
+        uintptr_t base = 0, real = 0, computed = 0;
+
+        void Run()
+        {
+            if (done) return;
+            if (!il::Ready()) return;
+
+            void* kPC = il::Class("", "PlayerController", "Assembly-CSharp");
+            void* mHealth = il::Method(kPC, "get_Health", 0);
+            if (!mHealth) return;   // ещё не готово, попробуем на следующем кадре
+
+            base = (uintptr_t)il::ModuleBase();
+            // ДОПУЩЕНИЕ: MethodInfo.methodPointer лежит по смещению 0x0 от начала структуры MethodInfo.
+            // Это обычная раскладка IL2CPP, но именно для этой сборки не подтверждено.
+            real = (uintptr_t)il::Read<void*>((uintptr_t)mHealth);
+            computed = base + 0x1634EE0;   // RVA get_Health из dump.cs (PlayerController.get_Health)
+
+            match = (base != 0 && real == computed);
+            plausible = (real > base) && (real - base) < 0x10000000;   // код внутри разумных ~256 МБ от базы
+
+            done = true;
+        }
+    }
+
     // ---- Silent aim: хук ArmsController.FireRay(Vector3 camPos, Vector3 forward, float distance) ----
     // RVA 0x124D1F4, dump.cs. Подменяем forward прямо перед вызовом оригинала, камеру не трогаем.
     namespace Silent
@@ -199,17 +231,73 @@ namespace
         };
         Target g_target;
 
-        // Сигнатура повторяет нативный вызов IL2CPP: this, Vector3 (HFA из 3 float) по значению,
-        // ещё один Vector3, float, и скрытый хвостовой MethodInfo* — его IL2CPP добавляет всем методам.
         using FireRay_t = void (*)(void* self, V3 camPos, V3 forward, float distance, void* methodInfo);
         FireRay_t g_orig = nullptr;
         bool      g_hooked = false;
 
         void Fake(void* self, V3 camPos, V3 forward, float distance, void* methodInfo)
         {
-            // ДИАГНОСТИКА: подмена направления временно отключена.
-            // Если крашит и так — дело не в этой логике, а в самом хуке (адрес/сигнатура/Dobby).
+            if (aim::silent && g_target.valid.load(std::memory_order_relaxed)) {
+                double age = ImGui::GetTime() - g_target.updatedAt;
+                if (age >= 0.0 && age < Cfg::SilentTargetMaxAge) {
+                    V3 dir{ g_target.x - camPos.x, g_target.y - camPos.y, g_target.z - camPos.z };
+                    float len = std::sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z);
+                    if (len > 1e-4f) forward = { dir.x / len, dir.y / len, dir.z / len };
+                }
+            }
             if (g_orig) g_orig(self, camPos, forward, distance, methodInfo);
+        }
+
+        // ---- Диагностика 1: get_Health (0 Vector3-параметров) ----
+        constexpr uintptr_t kHealthTestRva = 0x1634EE0;
+        using GetHealth_t = int (*)(void* self, void* methodInfo);
+        GetHealth_t g_origHealth = nullptr;
+        bool        g_healthHooked = false;
+        std::atomic<int> g_healthCalls{0};
+
+        int FakeHealth(void* self, void* methodInfo)
+        {
+            g_healthCalls.fetch_add(1, std::memory_order_relaxed);
+            return g_origHealth ? g_origHealth(self, methodInfo) : 0;
+        }
+
+        bool InstallHealthTest()
+        {
+            if (g_healthHooked) return true;
+            if (!il::Ready()) return false;
+            void* base = il::ModuleBase();
+            if (!base) return false;
+            void* target = (void*)((uintptr_t)base + kHealthTestRva);
+            int rc = DobbyHook(target, (void*)FakeHealth, (void**)&g_origHealth);
+            if (rc != 0) return false;
+            g_healthHooked = true;
+            return true;
+        }
+
+        // ---- Диагностика 2: Camera.WorldToScreenPoint (1 Vector3-параметр) ----
+        constexpr uintptr_t kW2STestRva = 0x2D0F5B0;
+        using W2STest_t = V3 (*)(void* self, V3 position, void* methodInfo);
+        W2STest_t g_origW2S = nullptr;
+        bool      g_w2sHooked = false;
+        std::atomic<int> g_w2sCalls{0};
+
+        V3 FakeW2S(void* self, V3 position, void* methodInfo)
+        {
+            g_w2sCalls.fetch_add(1, std::memory_order_relaxed);
+            return g_origW2S ? g_origW2S(self, position, methodInfo) : V3{0,0,0};
+        }
+
+        bool InstallW2STest()
+        {
+            if (g_w2sHooked) return true;
+            if (!il::Ready()) return false;
+            void* base = il::ModuleBase();
+            if (!base) return false;
+            void* target = (void*)((uintptr_t)base + kW2STestRva);
+            int rc = DobbyHook(target, (void*)FakeW2S, (void**)&g_origW2S);
+            if (rc != 0) return false;
+            g_w2sHooked = true;
+            return true;
         }
 
         bool Install()
@@ -219,6 +307,13 @@ namespace
             void* base = il::ModuleBase();
             if (!base) return false;
             void* target = (void*)((uintptr_t)base + kFireRayRva);
+
+            // ВРЕМЕННО: если хочешь проверить только ModuleCheck без риска нового краша от хуков,
+            // закомментируй три вызова ниже (InstallHealthTest/InstallW2STest/DobbyHook) и просто
+            // верни false отсюда, чтобы хуки вообще не ставились в этом прогоне.
+            InstallHealthTest();
+            InstallW2STest();
+
             int rc = DobbyHook(target, (void*)Fake, (void**)&g_orig);
             if (rc != 0) return false;
             g_hooked = true;
@@ -404,17 +499,17 @@ namespace
         void  Reset() { have = false; }
     } D;
 
-    void Status(ImDrawList* dl, const char* t)
+    void Status(ImDrawList* dl, ImVec2 pos, const char* t)
     {
         if (!kStatus) return;
-        dl->AddText(ImVec2(11, 114), IM_COL32(0, 0, 0, 255), t);
-        dl->AddText(ImVec2(10, 113), IM_COL32(255, 160, 0, 255), t);
+        dl->AddText(ImVec2(pos.x + 1, pos.y + 1), IM_COL32(0, 0, 0, 255), t);
+        dl->AddText(pos, IM_COL32(255, 160, 0, 255), t);
     }
 
     void AimbotFrame(ImDrawList* dl, ImVec2 center)
     {
         char st[360];
-        if (!ResolveApi()) { std::snprintf(st, sizeof st, "AIM: missing %s", A.missing.c_str()); Status(dl, st); return; }
+        if (!ResolveApi()) { std::snprintf(st, sizeof st, "AIM: missing %s", A.missing.c_str()); Status(dl, ImVec2(10,113), st); return; }
 
         double now = ImGui::GetTime();
         if (W.last < 0.0 || now - W.last >= Cfg::RefreshInterval) {
@@ -436,7 +531,7 @@ namespace
         if (!il::ValidPtr(cam) || !il::ValidPtr(W.lock) || !il::ValidPtr(W.body)) {
             std::snprintf(st, sizeof st, "AIM: no local view (pc=%d loc=%d cam=%d lock=%d body=%d)",
                           W.nPc, W.nLocal, il::ValidPtr(cam), il::ValidPtr(W.lock), il::ValidPtr(W.body));
-            Status(dl, st);
+            Status(dl, ImVec2(10,113), st);
             D.Reset(); W.lockedPc = 0; W.lostSince = -1.0; W.overrideUntil = -1.0;
             Silent::Clear();
             return;
@@ -581,11 +676,22 @@ namespace
         W.lastCmdY = cmdY;
 
         std::snprintf(st, sizeof st,
-            "AIM pc=%d loc=%d cand=%d fov=%d hid=%d tgt=%d lock=%d ovr=%d pred=%d sil=%d hook=%d | eY=%.1f eP=%.1f %s",
+            "AIM pc=%d loc=%d cand=%d fov=%d hid=%d tgt=%d lock=%d ovr=%d pred=%d sil=%d hook=%d hpHook=%d hpCalls=%d w2sHook=%d w2sCalls=%d | eY=%.1f eP=%.1f %s",
             W.nPc, W.nLocal, (int)W.cands.size(), inFov, hid, best ? 1 : 0, (int)(W.lockedPc != 0),
             overriding ? 1 : 0, predicted ? 1 : 0, (int)aim::silent, (int)Silent::g_hooked,
+            (int)Silent::g_healthHooked, Silent::g_healthCalls.load(),
+            (int)Silent::g_w2sHooked, Silent::g_w2sCalls.load(),
             eY, eP, overriding ? "OVERRIDE" : (aim::silent ? "silent" : (wrote ? "writing" : "idle")));
-        Status(dl, st);
+        Status(dl, ImVec2(10,113), st);
+
+        ModuleCheck::Run();
+        char st2[220];
+        std::snprintf(st2, sizeof st2,
+            "MODCHECK done=%d base=0x%llx real=0x%llx calc=0x%llx match=%d plaus=%d",
+            (int)ModuleCheck::done,
+            (unsigned long long)ModuleCheck::base, (unsigned long long)ModuleCheck::real,
+            (unsigned long long)ModuleCheck::computed, (int)ModuleCheck::match, (int)ModuleCheck::plausible);
+        Status(dl, ImVec2(10,130), st2);
     }
 }
 
