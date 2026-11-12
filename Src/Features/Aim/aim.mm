@@ -10,68 +10,60 @@
 #include <string>
 #include <vector>
 
-#include "Dobby/include/dobby.h"
-
 namespace il = IL2CPP;
 
 namespace
 {
     struct V3 { float x, y, z; };
 
-    constexpr bool  kStatus = true;          // строка диагностики на экране; false = выключить
+    constexpr bool  kStatus = true;
     constexpr float kR2D    = 57.2957795f;
 
-    // Источник оффсетов: dump.cs, присланный пользователем (Assembly-CSharp).
     namespace Cfg
     {
-        constexpr uintptr_t PC_IsRagdolling = 0x49;  // PlayerController.IsRagdolling
-        constexpr uintptr_t PC_MainCamera   = 0x30;  // PlayerController._mainCamera
-        constexpr uintptr_t PC_PlayerLock   = 0x68;  // PlayerController._playerLock
-        constexpr uintptr_t PC_Player       = 0x90;  // PlayerController._player
-        constexpr uintptr_t PC_IsDeath      = 0xA8;  // PlayerController._isDeath
-        constexpr uintptr_t PC_HiddenMask   = 0xC4;  // PlayerController._hiddenMask
-        constexpr int HiddenByRound = 1, HiddenBySpectate = 2, HiddenByOcclusion = 4;   // const в PlayerController
-        constexpr int HiddenAlways  = HiddenByRound | HiddenBySpectate;   // не про стены, блокирует всегда
+        constexpr uintptr_t PC_IsRagdolling = 0x49;
+        constexpr uintptr_t PC_MainCamera   = 0x30;
+        constexpr uintptr_t PC_PlayerLock   = 0x68;
+        constexpr uintptr_t PC_Player       = 0x90;
+        constexpr uintptr_t PC_IsDeath      = 0xA8;
+        constexpr uintptr_t PC_HiddenMask   = 0xC4;
+        constexpr int HiddenByRound = 1, HiddenBySpectate = 2, HiddenByOcclusion = 4;
+        constexpr int HiddenAlways  = HiddenByRound | HiddenBySpectate;
 
-        constexpr uintptr_t PL_PlayerBody   = 0x20;  // PlayerLock._playerBody (GameObject)
-        constexpr uintptr_t PL_RotationX    = 0x40;  // PlayerLock.rotationX (public float, питч, градусы Эйлера)
+        constexpr uintptr_t PL_PlayerBody   = 0x20;
+        constexpr uintptr_t PL_RotationX    = 0x40;
 
-        constexpr uintptr_t Player_IsLocal  = 0x1C;  // Photon.Realtime.Player.IsLocal
-        constexpr uintptr_t Skel_Body       = 0x60;  // PlayerSkeleton._body
-        constexpr uintptr_t Skel_HeadBone   = 0xC0;  // PlayerSkeleton._headBone (предположительно Rigidbody), запасной вариант
-        constexpr uintptr_t Skel_ChestBone  = 0xC8;  // PlayerSkeleton._chestBone (предположительно Rigidbody)
-        constexpr uintptr_t Skel_PelvisBone = 0xD0;  // PlayerSkeleton._pelvisBone (предположительно Rigidbody), запасной вариант
+        constexpr uintptr_t Player_IsLocal  = 0x1C;
+        constexpr uintptr_t Skel_Body       = 0x60;
+        constexpr uintptr_t Skel_HeadBone   = 0xC0;
+        constexpr uintptr_t Skel_ChestBone  = 0xC8;
+        constexpr uintptr_t Skel_PelvisBone = 0xD0;
 
-        constexpr double RefreshInterval = 0.25;     // период пересборки списка целей, сек
-
-        // Не откалибровано, подбирать в игре.
-        constexpr float  KeepRadiusMul     = 1.5f;   // держим текущую цель, пока она внутри fov_radius*этот множитель
-        constexpr double LoseGraceSec      = 0.15;   // сколько секунд терпим потерю цели (окклюзия на кадр, моргание), прежде чем сбросить
-        constexpr float  MaxDegPerSec      = 220.f;  // жёсткий потолок скорости поворота по обеим осям
-        constexpr float  DefaultPitchLimit = 80.f;   // запасной лимит питча, если get_LookXLimit недоступен
-
-        // Детектор "ты сам резко увёл взгляд" — отпускаем цель и ставим коррекцию на паузу.
-        constexpr float  OverrideYawDegPerFrame = 12.f;   // свой вклад за кадр больше этого — считаем сознательным уводом
-        constexpr double OverrideHoldSec        = 0.25;   // на сколько пауза
-
-        // Prediction (только для aimbot/silent): нет поля скорости снаряда в dump.cs (оружие похоже на хитскан),
-        // поэтому компенсируем не баллистику, а задержку собственного сглаживания.
+        constexpr double RefreshInterval = 0.25;
+        constexpr float  KeepRadiusMul     = 1.5f;
+        constexpr double LoseGraceSec      = 0.15;
+        constexpr float  MaxDegPerSec      = 220.f;
+        constexpr float  DefaultPitchLimit = 80.f;
+        constexpr float  OverrideYawDegPerFrame = 12.f;
+        constexpr double OverrideHoldSec        = 0.25;
         constexpr float  PredictLeadSec  = 0.12f;
-        constexpr float  MaxSaneSpeed    = 15.f;    // м/с, отсечка на случай мусора в Rigidbody.velocity
+        constexpr float  MaxSaneSpeed    = 15.f;
 
-        // Silent aim: сколько времени кэшированная цель считается ещё свежей для хука FireRay.
-        constexpr double SilentTargetMaxAge = 0.35;
+        // visibility raycast
+        constexpr float  VisShrinkMeters = 0.5f;   // сдвиг точки назначения, чтобы не попасть в коллайдер цели
+        constexpr int    VisLayerMask    = -5;     // DefaultRaycastLayers: всё кроме IgnoreRaycast
     }
 
     struct Api
     {
         bool ready = false;
         std::string missing;
-        void *kPC{}, *kPlayer{}, *kSkel{}, *kPlayerLock{}, *kRigidbody{};
+        void *kPC{}, *kPlayer{}, *kSkel{}, *kPlayerLock{}, *kRigidbody{}, *kPhysics{};
         void *mGetTransform{}, *mGoGetTransform{}, *mGetCompInChildren{}, *mGetPos{}, *mGetFwd{}, *mRotate4{};
         void *mW2S{}, *mCamMain{}, *mScreenW{}, *mScreenH{}, *mGetHeadBone{};
         void *mTeam{}, *mIsAlive{}, *mHealth{}, *mLookXLimit{}, *mGetVelocity{};
         void *kSMR{}, *mGetBones{};
+        void *mLinecast2{};
     } A;
 
     bool ResolveApi()
@@ -85,9 +77,10 @@ namespace
         A.kSkel       = il::Class("ScarletWork.Game", "PlayerSkeleton", "Assembly-CSharp");
         A.kPlayerLock = il::Class("ScarletWork.Game", "PlayerLock", "Assembly-CSharp");
         A.kPlayer     = il::Class("Photon.Realtime", "Player", "PhotonRealtime");
-        A.kRigidbody  = il::Class("UnityEngine", "Rigidbody", "UnityEngine.PhysicsModule");   // опционально, для prediction
+        A.kRigidbody  = il::Class("UnityEngine", "Rigidbody", "UnityEngine.PhysicsModule");
+        A.kPhysics    = il::Class("UnityEngine", "Physics", "UnityEngine.PhysicsModule");
         A.kSMR        = il::Class("UnityEngine", "SkinnedMeshRenderer", core);
-        A.mGetBones   = il::Method(A.kSMR, "get_bones", 0);   // опционально
+        A.mGetBones   = il::Method(A.kSMR, "get_bones", 0);
 
         void* kComponent  = il::Class("UnityEngine", "Component", core);
         void* kGameObject = il::Class("UnityEngine", "GameObject", core);
@@ -100,17 +93,20 @@ namespace
         A.mGetCompInChildren = il::Method(kComponent, "GetComponentInChildren", 2);
         A.mGetPos            = il::Method(kTransform, "get_position", 0);
         A.mGetFwd            = il::Method(kTransform, "get_forward", 0);
-        A.mRotate4           = il::Method(kTransform, "Rotate", 4);      // Rotate(float x, float y, float z, Space)
+        A.mRotate4           = il::Method(kTransform, "Rotate", 4);
         A.mW2S               = il::Method(kCamera, "WorldToScreenPoint", 1);
         A.mCamMain           = il::Method(kCamera, "get_main", 0);
         A.mScreenW           = il::Method(kScreen, "get_width", 0);
         A.mScreenH           = il::Method(kScreen, "get_height", 0);
-        A.mGetHeadBone       = il::Method(A.kSkel, "GetHeadBone", 0);          // опционально
-        A.mTeam              = il::Method(A.kPlayer, "get_Team", 0);           // опционально
-        A.mIsAlive           = il::Method(A.kPlayer, "get_IsAlive", 0);        // опционально
-        A.mHealth            = il::Method(A.kPC, "get_Health", 0);             // опционально
-        A.mLookXLimit        = il::Method(A.kPlayerLock, "get_LookXLimit", 0); // опционально
-        A.mGetVelocity       = il::Method(A.kRigidbody, "get_velocity", 0);    // опционально, для prediction
+        A.mGetHeadBone       = il::Method(A.kSkel, "GetHeadBone", 0);
+        A.mTeam              = il::Method(A.kPlayer, "get_Team", 0);
+        A.mIsAlive           = il::Method(A.kPlayer, "get_IsAlive", 0);
+        A.mHealth            = il::Method(A.kPC, "get_Health", 0);
+        A.mLookXLimit        = il::Method(A.kPlayerLock, "get_LookXLimit", 0);
+        A.mGetVelocity       = il::Method(A.kRigidbody, "get_velocity", 0);
+
+        // Physics.Linecast(Vector3 start, Vector3 end) -> bool (без out, без маски)
+        A.mLinecast2         = il::Method(A.kPhysics, "Linecast", 2);
 
         need(A.kPC, "PlayerController"); need(A.kSkel, "PlayerSkeleton"); need(A.kPlayerLock, "PlayerLock");
         need(A.mGetTransform, "Component.get_transform"); need(A.mGoGetTransform, "GameObject.get_transform");
@@ -173,173 +169,61 @@ namespace
         return PosOfTransform(tr, out);
     }
 
-    // Скорость объекта, только если его реальный класс — Rigidbody (проверено рантаймом, не на веру).
+    V3 WorldPos(void* component)
+    {
+        V3 out{};
+        PosOfComponent(component, out);
+        return out;
+    }
+
     bool VelocityOfRigidbody(void* obj, V3& out)
     {
         if (!A.mGetVelocity || !A.kRigidbody || !il::ValidPtr((uintptr_t)obj)) return false;
         void* cls = il::ClassOf(obj);
-        if (cls != A.kRigidbody) return false;   // не тот тип — не рискуем звать чужой метод
+        if (cls != A.kRigidbody) return false;
         out = il::InvokeBoxed<V3>(A.mGetVelocity, obj, nullptr);
         if (!Finite(out)) return false;
         float sp = std::sqrt(out.x * out.x + out.y * out.y + out.z * out.z);
         return sp <= Cfg::MaxSaneSpeed;
     }
 
-    // ---- ModuleCheck: проверка ModuleBase() и формулы "RVA из dump.cs = база + смещение" БЕЗ единого хука.
-    // Берём настоящий нативный адрес уже резолвленного и рабочего метода (get_Health, его каждый кадр
-    // вызывает ESP через обычный IL2CPP::Invoke) и сравниваем с тем, что даёт наша формула.
-    namespace ModuleCheck
+    // ---- Настоящая проверка видимости через Physics.Linecast ----
+    // Возвращает true если между eye и target **есть стена/препятствие**.
+    // Конечную точку сдвигаем на VisShrinkMeters, чтобы не попасть в коллайдер самой цели.
+    static bool RayBlocked(const V3& eye, const V3& target, float shrink)
     {
-        bool      done = false;
-        bool      match = false;
-        bool      plausible = false;
-        uintptr_t base = 0, real = 0, computed = 0;
+        if (!A.mLinecast2) return false;
+        V3 d = { target.x - eye.x, target.y - eye.y, target.z - eye.z };
+        float dist2 = d.x*d.x + d.y*d.y + d.z*d.z;
+        if (dist2 < 1.0f) return false;   // ближе 1 м — считаем видимым
+        float dist = std::sqrt(dist2);
+        float eff  = dist - shrink;
+        if (eff <= 0.1f) return false;
+        float k = eff / dist;
 
-        void Run()
-        {
-            if (done) return;
-            if (!il::Ready()) return;
+        V3 start = eye;
+        V3 end   = { eye.x + d.x * k, eye.y + d.y * k, eye.z + d.z * k };
 
-            void* kPC = il::Class("", "PlayerController", "Assembly-CSharp");
-            void* mHealth = il::Method(kPC, "get_Health", 0);
-            if (!mHealth) return;   // ещё не готово, попробуем на следующем кадре
-
-            base = (uintptr_t)il::ModuleBase();
-            // ДОПУЩЕНИЕ: MethodInfo.methodPointer лежит по смещению 0x0 от начала структуры MethodInfo.
-            // Это обычная раскладка IL2CPP, но именно для этой сборки не подтверждено.
-            real = (uintptr_t)il::Read<void*>((uintptr_t)mHealth);
-            computed = base + 0x1634EE0;   // RVA get_Health из dump.cs (PlayerController.get_Health)
-
-            match = (base != 0 && real == computed);
-            plausible = (real > base) && (real - base) < 0x10000000;   // код внутри разумных ~256 МБ от базы
-
-            done = true;
-        }
+        void* args[2] = { &start, &end };
+        void* r = il::Invoke(A.mLinecast2, nullptr, args);
+        if (!il::ValidPtr((uintptr_t)r)) return false;
+        return *((bool*)((uint8_t*)r + 0x10));
     }
 
-    // ---- Silent aim: хук ArmsController.FireRay(Vector3 camPos, Vector3 forward, float distance) ----
-    // RVA 0x124D1F4, dump.cs. Подменяем forward прямо перед вызовом оригинала, камеру не трогаем.
-    namespace Silent
+    // Цель видима, если луч к голове ИЛИ к ногам не перекрыт стеной.
+    static bool EnemyVisible(const V3& eye, const V3& headPos, const V3& feetPos)
     {
-        constexpr uintptr_t kFireRayRva = 0x124D1F4;
-
-        struct Target
-        {
-            std::atomic<bool> valid{false};
-            float x = 0.f, y = 0.f, z = 0.f;
-            double updatedAt = -1.0;
-        };
-        Target g_target;
-
-        using FireRay_t = void (*)(void* self, V3 camPos, V3 forward, float distance, void* methodInfo);
-        FireRay_t g_orig = nullptr;
-        bool      g_hooked = false;
-
-        void Fake(void* self, V3 camPos, V3 forward, float distance, void* methodInfo)
-        {
-            if (aim::silent && g_target.valid.load(std::memory_order_relaxed)) {
-                double age = ImGui::GetTime() - g_target.updatedAt;
-                if (age >= 0.0 && age < Cfg::SilentTargetMaxAge) {
-                    V3 dir{ g_target.x - camPos.x, g_target.y - camPos.y, g_target.z - camPos.z };
-                    float len = std::sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z);
-                    if (len > 1e-4f) forward = { dir.x / len, dir.y / len, dir.z / len };
-                }
-            }
-            if (g_orig) g_orig(self, camPos, forward, distance, methodInfo);
-        }
-
-        // ---- Диагностика 1: get_Health (0 Vector3-параметров) ----
-        constexpr uintptr_t kHealthTestRva = 0x1634EE0;
-        using GetHealth_t = int (*)(void* self, void* methodInfo);
-        GetHealth_t g_origHealth = nullptr;
-        bool        g_healthHooked = false;
-        std::atomic<int> g_healthCalls{0};
-
-        int FakeHealth(void* self, void* methodInfo)
-        {
-            g_healthCalls.fetch_add(1, std::memory_order_relaxed);
-            return g_origHealth ? g_origHealth(self, methodInfo) : 0;
-        }
-
-        bool InstallHealthTest()
-        {
-            if (g_healthHooked) return true;
-            if (!il::Ready()) return false;
-            void* base = il::ModuleBase();
-            if (!base) return false;
-            void* target = (void*)((uintptr_t)base + kHealthTestRva);
-            int rc = DobbyHook(target, (void*)FakeHealth, (void**)&g_origHealth);
-            if (rc != 0) return false;
-            g_healthHooked = true;
-            return true;
-        }
-
-        // ---- Диагностика 2: Camera.WorldToScreenPoint (1 Vector3-параметр) ----
-        constexpr uintptr_t kW2STestRva = 0x2D0F5B0;
-        using W2STest_t = V3 (*)(void* self, V3 position, void* methodInfo);
-        W2STest_t g_origW2S = nullptr;
-        bool      g_w2sHooked = false;
-        std::atomic<int> g_w2sCalls{0};
-
-        V3 FakeW2S(void* self, V3 position, void* methodInfo)
-        {
-            g_w2sCalls.fetch_add(1, std::memory_order_relaxed);
-            return g_origW2S ? g_origW2S(self, position, methodInfo) : V3{0,0,0};
-        }
-
-        bool InstallW2STest()
-        {
-            if (g_w2sHooked) return true;
-            if (!il::Ready()) return false;
-            void* base = il::ModuleBase();
-            if (!base) return false;
-            void* target = (void*)((uintptr_t)base + kW2STestRva);
-            int rc = DobbyHook(target, (void*)FakeW2S, (void**)&g_origW2S);
-            if (rc != 0) return false;
-            g_w2sHooked = true;
-            return true;
-        }
-
-        bool Install()
-        {
-            if (g_hooked) return true;
-            if (!il::Ready()) return false;
-            void* base = il::ModuleBase();
-            if (!base) return false;
-            void* target = (void*)((uintptr_t)base + kFireRayRva);
-
-            // ВРЕМЕННО: если хочешь проверить только ModuleCheck без риска нового краша от хуков,
-            // закомментируй три вызова ниже (InstallHealthTest/InstallW2STest/DobbyHook) и просто
-            // верни false отсюда, чтобы хуки вообще не ставились в этом прогоне.
-            InstallHealthTest();
-            InstallW2STest();
-
-            int rc = DobbyHook(target, (void*)Fake, (void**)&g_orig);
-            if (rc != 0) return false;
-            g_hooked = true;
-            return true;
-        }
-
-        void Remove()
-        {
-            if (!g_hooked) return;
-            void* base = il::ModuleBase();
-            if (base) DobbyDestroy((void*)((uintptr_t)base + kFireRayRva));
-            g_hooked = false;
-            g_orig = nullptr;
-        }
-
-        void SetTarget(const V3& pos, double now)
-        {
-            g_target.x = pos.x; g_target.y = pos.y; g_target.z = pos.z;
-            g_target.updatedAt = now;
-            g_target.valid.store(true, std::memory_order_relaxed);
-        }
-        void Clear() { g_target.valid.store(false, std::memory_order_relaxed); }
+        bool headBlocked = RayBlocked(eye, headPos, Cfg::VisShrinkMeters);
+        bool feetBlocked = RayBlocked(eye, feetPos, Cfg::VisShrinkMeters);
+        return !(headBlocked && feetBlocked);
     }
 
-    // ---- Цели ----
-    struct Cand { uintptr_t pc = 0, player = 0, skeleton = 0, headBone = 0; std::string team; };
+    struct Cand
+    {
+        uintptr_t pc = 0, player = 0, skeleton = 0, headBone = 0;
+        std::string team;
+        V3 feet{};        // позиция PlayerController (ноги/центр)
+    };
 
     struct World
     {
@@ -354,8 +238,8 @@ namespace
         double    lostSince = -1.0;
         uintptr_t prevLock = 0;
 
-        double overrideUntil = -1.0;   // до этого времени не пишем коррекцию — ты сам уводишь взгляд
-        float  lastCmdY = 0.f;         // сколько реальных градусов по яву мы сами скомандовали прошлым кадром
+        double overrideUntil = -1.0;
+        float  lastCmdY = 0.f;
     } W;
 
     uintptr_t PickHeadBone(uintptr_t body)
@@ -363,7 +247,7 @@ namespace
         if (!A.mGetBones || !il::ValidPtr(body)) return 0;
         uintptr_t arr = (uintptr_t)il::Invoke(A.mGetBones, (void*)body, nullptr);
         if (!il::ValidPtr(arr)) return 0;
-        uint64_t len = il::Read<uint64_t>(arr + 0x18);     // Il2CppArray: max_length @0x18, data @0x20
+        uint64_t len = il::Read<uint64_t>(arr + 0x18);
         if (len == 0 || len > 512) return 0;
 
         uintptr_t best = 0; float bestY = -1e9f;
@@ -402,7 +286,7 @@ namespace
                 }
                 W.haveLocal = true;
                 W.localTeam = team;
-                continue;                                   // себя в цели не берём
+                continue;
             }
 
             bool inc = true;
@@ -411,7 +295,14 @@ namespace
             if (!il::ValidPtr(sk)) { W.nNoSkel++; continue; }
             uintptr_t body = il::Read<uintptr_t>(sk + Cfg::Skel_Body);
             uintptr_t hb = PickHeadBone(body);
-            W.cands.push_back({ pc, player, sk, hb, team });
+            Cand c;
+            c.pc = pc;
+            c.player = player;
+            c.skeleton = sk;
+            c.headBone = hb;
+            c.team = team;
+            c.feet = WorldPos((void*)pc);
+            W.cands.push_back(std::move(c));
         }
     }
 
@@ -430,16 +321,10 @@ namespace
         int m = il::Read<int>(c.pc + Cfg::PC_HiddenMask);
         return (m & Cfg::HiddenAlways) != 0;
     }
-    bool IsOccluded(const Cand& c)
-    {
-        int m = il::Read<int>(c.pc + Cfg::PC_HiddenMask);
-        return (m & Cfg::HiddenByOcclusion) != 0;
-    }
 
     double g_nextRoll = 0.0;
     bool   g_rollHead = true;
 
-    // bone — указатель на объект, который дал позицию (если это реально Rigidbody, из него же берём скорость).
     bool AimPoint(const Cand& c, V3& out, void*& bone)
     {
         bone = nullptr;
@@ -472,12 +357,11 @@ namespace
         void* a[1] = { &p };
         V3 s = il::InvokeBoxed<V3>(A.mW2S, (void*)cam, a);
         if (!Finite(s) || s.z <= 0.f) return false;
-        out = ImVec2(s.x * sx, (screenH - s.y) * sy);   // Unity: начало снизу-слева, ImGui: сверху-слева
+        out = ImVec2(s.x * sx, (screenH - s.y) * sy);
         return true;
     }
 
-    // ---- Углы ----
-    struct Ang { float yaw, pitch; };   // градусы; yaw = atan2(x, z), pitch > 0 = вверх
+    struct Ang { float yaw, pitch; };
 
     bool FromDir(const V3& d, Ang& out)
     {
@@ -489,13 +373,11 @@ namespace
     }
     float Wrap(float a) { while (a > 180.f) a -= 360.f; while (a < -180.f) a += 360.f; return a; }
 
-    // Диагностика корреляции (только для статуса, в управление НЕ идёт — Transform.Rotate и rotationX
-    // уже в реальных градусах, калибровка здесь лишняя и была источником перекручивания).
     struct Diag
     {
         float lastY = 0.f, lastP = 0.f;
         bool  have = false;
-        float corrY = 0.f, corrP = 0.f;   // последняя измеренная "реальный угол / команда", только для чтения
+        float corrY = 0.f, corrP = 0.f;
         void  Reset() { have = false; }
     } D;
 
@@ -508,14 +390,14 @@ namespace
 
     void AimbotFrame(ImDrawList* dl, ImVec2 center)
     {
-        char st[360];
+        char st[420];
         if (!ResolveApi()) { std::snprintf(st, sizeof st, "AIM: missing %s", A.missing.c_str()); Status(dl, ImVec2(10,113), st); return; }
 
         double now = ImGui::GetTime();
         if (W.last < 0.0 || now - W.last >= Cfg::RefreshInterval) {
             W.last = now;
             Refresh();
-            if (W.lock != W.prevLock) {           // новый матч/респавн локального игрока
+            if (W.lock != W.prevLock) {
                 D.Reset();
                 W.lockedPc = 0; W.lostSince = -1.0; W.overrideUntil = -1.0; W.lastCmdY = 0.f;
                 W.prevLock = W.lock;
@@ -533,7 +415,6 @@ namespace
                           W.nPc, W.nLocal, il::ValidPtr(cam), il::ValidPtr(W.lock), il::ValidPtr(W.body));
             Status(dl, ImVec2(10,113), st);
             D.Reset(); W.lockedPc = 0; W.lostSince = -1.0; W.overrideUntil = -1.0;
-            Silent::Clear();
             return;
         }
 
@@ -554,43 +435,51 @@ namespace
         float fp = il::Read<float>(W.lock + Cfg::PL_RotationX);
         if (!std::isfinite(fp)) return;
 
-        // Детектор "сам резко увёл взгляд": сравниваем реальное изменение яв за кадр с тем, что скомандовали мы сами.
         bool overriding = false;
         if (D.have) {
             float realDY = Wrap(cur.yaw - D.lastY);
             float userDY = realDY - W.lastCmdY;
             if (std::fabs(userDY) > Cfg::OverrideYawDegPerFrame) {
                 W.overrideUntil = now + Cfg::OverrideHoldSec;
-                W.lockedPc = 0;        // сразу отпускаем старую цель, дальше выбор пойдёт заново
+                W.lockedPc = 0;
                 W.lostSince = -1.0;
             }
-            if (std::fabs(realDY) > 1e-6f) D.corrY = userDY / realDY;   // чисто для статуса
+            if (std::fabs(realDY) > 1e-6f) D.corrY = userDY / realDY;
         }
         overriding = now < W.overrideUntil;
         D.lastY = cur.yaw; D.lastP = cur.pitch; D.have = true;
 
-        // Выбор цели: сначала пробуем удержать уже выбранную, чтобы не дёргаться на границе FOV.
-        auto qualifies = [&](const Cand& c, ImVec2& s, float& d) -> bool {
+        // Требование видимости: явный флаг ИЛИ (aim_through_walls = false)
+        const bool requireVisible = aim::aimbot_visiblity_check || !aim::aim_through_walls;
+
+        // Простая проверка (без raycast): команда, смерть, всегда-скрыт, FOV
+        auto qualifiesBasic = [&](const Cand& c, ImVec2& s, float& d, V3& hitPos, void*& bone) -> bool {
             if (W.haveLocal && !W.localTeam.empty() && c.team == W.localTeam) return false;
             if (IsDead(c)) return false;
             if (IsAlwaysHidden(c)) return false;
-            if (!aim::aim_through_walls && IsOccluded(c)) return false;
-            V3 p; void* bone;
-            if (!AimPoint(c, p, bone)) return false;
-            if (!W2S(cam, p, sx, sy, (float)sh, s)) return false;
+            if (!AimPoint(c, hitPos, bone)) return false;
+            if (!W2S(cam, hitPos, sx, sy, (float)sh, s)) return false;
             d = std::hypot(s.x - center.x, s.y - center.y);
             return true;
         };
 
-        const Cand* best = nullptr; V3 bestPos{}; void* bestBone = nullptr; int inFov = 0, hid = 0;
+        // Полная проверка: basic + raycast visibility (если нужно)
+        auto qualifies = [&](const Cand& c, ImVec2& s, float& d, V3& hitPos, void*& bone) -> bool {
+            if (!qualifiesBasic(c, s, d, hitPos, bone)) return false;
+            if (requireVisible && !EnemyVisible(eye, hitPos, c.feet)) return false;
+            return true;
+        };
 
+        const Cand* best = nullptr; V3 bestPos{}; void* bestBone = nullptr;
+        int inFov = 0, hid = 0, vis = 0;
+
+        // Сначала пробуем удержать залоченную цель (проверяем сразу с видимостью)
         if (W.lockedPc) {
             for (const Cand& c : W.cands) {
                 if (c.pc != W.lockedPc) continue;
-                ImVec2 s; float d;
-                if (qualifies(c, s, d) && d < aim::fov_radius * Cfg::KeepRadiusMul) {
-                    V3 p; void* bone; AimPoint(c, p, bone);
-                    best = &c; bestPos = p; bestBone = bone;
+                ImVec2 s; float d; V3 hp; void* bone;
+                if (qualifies(c, s, d, hp, bone) && d < aim::fov_radius * Cfg::KeepRadiusMul) {
+                    best = &c; bestPos = hp; bestBone = bone;
                     W.lostSince = -1.0;
                 } else if (W.lostSince < 0.0) {
                     W.lostSince = now;
@@ -598,22 +487,30 @@ namespace
                 break;
             }
             if (!best && W.lostSince >= 0.0 && now - W.lostSince < Cfg::LoseGraceSec) {
-                // в пределах льготного времени просто не трогаем прицел в этом кадре
+                // grace period — не трогаем
             } else if (!best) {
                 W.lockedPc = 0;
                 W.lostSince = -1.0;
             }
         }
 
+        // Поиск новой цели — предпочитаем видимых
         for (const Cand& c : W.cands) {
             if (c.pc == W.lockedPc) continue;
-            ImVec2 s; float d;
-            if (!qualifies(c, s, d)) continue;
-            if (!aim::aim_through_walls && IsOccluded(c)) hid++;
-            if (d < aim::fov_radius) inFov++;
-            if (!best && d < aim::fov_radius) {
-                V3 p; void* bone; AimPoint(c, p, bone);
-                best = &c; bestPos = p; bestBone = bone;
+
+            ImVec2 s; float d; V3 hitPos; void* bone;
+            if (!qualifiesBasic(c, s, d, hitPos, bone)) continue;
+            if (d >= aim::fov_radius) continue;
+            inFov++;
+
+            bool blocked = requireVisible && !EnemyVisible(eye, hitPos, c.feet);
+            if (blocked) { hid++; continue; }
+            vis++;
+
+            if (!best) {
+                best = &c;
+                bestPos = hitPos;
+                bestBone = bone;
             }
         }
         if (best) W.lockedPc = best->pc;
@@ -635,70 +532,49 @@ namespace
             Ang des{};
             V3 dir{ bestPos.x - eye.x, bestPos.y - eye.y, bestPos.z - eye.z };
             if (FromDir(dir, des)) {
-                if (aim::silent) {
-                    // Камеру не трогаем — только отдаём точку прицеливания хуку FireRay.
-                    Silent::SetTarget(bestPos, now);
-                    eY = Wrap(des.yaw - cur.yaw);
-                    eP = des.pitch - cur.pitch;
-                } else {
-                    Silent::Clear();
-                    eY = Wrap(des.yaw - cur.yaw);
-                    eP = des.pitch - cur.pitch;
+                eY = Wrap(des.yaw - cur.yaw);
+                eP = des.pitch - cur.pitch;
 
-                    float dt = std::clamp(ImGui::GetIO().DeltaTime, 0.001f, 0.1f);
-                    float s = aim::aimbot_smoothing;
-                    float alpha = (s <= 1.f) ? 1.f : 1.f - std::pow(1.f - 1.f / s, dt * 60.f);
+                float dt = std::clamp(ImGui::GetIO().DeltaTime, 0.001f, 0.1f);
+                float s = aim::aimbot_smoothing;
+                float alpha = (s <= 1.f) ? 1.f : 1.f - std::pow(1.f - 1.f / s, dt * 60.f);
 
-                    float maxStep = Cfg::MaxDegPerSec * dt;
-                    float dY  = std::clamp(eY * alpha, -maxStep, maxStep);    // реальные градусы, Rotate их и ждёт
-                    float dFp = -std::clamp(eP * alpha, -maxStep, maxStep);   // минус: +X в Unity крутит камеру вниз
+                float maxStep = Cfg::MaxDegPerSec * dt;
+                float dY  = std::clamp(eY * alpha, -maxStep, maxStep);
+                float dFp = -std::clamp(eP * alpha, -maxStep, maxStep);
 
-                    if (std::isfinite(dY) && std::isfinite(dFp) && (std::fabs(eY) > 0.05f || std::fabs(eP) > 0.05f)) {
-                        float x = 0.f, y = dY, z = 0.f;
-                        int space = 0;                          // Space.World
-                        void* a[4] = { &x, &y, &z, &space };
-                        il::Invoke(A.mRotate4, bodyTr, a);
+                if (std::isfinite(dY) && std::isfinite(dFp) && (std::fabs(eY) > 0.05f || std::fabs(eP) > 0.05f)) {
+                    float x = 0.f, y = dY, z = 0.f;
+                    int space = 0;
+                    void* a[4] = { &x, &y, &z, &space };
+                    il::Invoke(A.mRotate4, bodyTr, a);
 
-                        float newPitch = fp + dFp;
-                        float limit = Cfg::DefaultPitchLimit;
-                        CallFloat(A.mLookXLimit, (void*)W.lock, limit);
-                        newPitch = std::clamp(newPitch, -limit, limit);
-                        il::Write<float>(W.lock + Cfg::PL_RotationX, newPitch);
+                    float newPitch = fp + dFp;
+                    float limit = Cfg::DefaultPitchLimit;
+                    CallFloat(A.mLookXLimit, (void*)W.lock, limit);
+                    newPitch = std::clamp(newPitch, -limit, limit);
+                    il::Write<float>(W.lock + Cfg::PL_RotationX, newPitch);
 
-                        cmdY = dY;
-                        wrote = true;
-                    }
+                    cmdY = dY;
+                    wrote = true;
                 }
             }
-        } else {
-            Silent::Clear();
         }
         W.lastCmdY = cmdY;
 
         std::snprintf(st, sizeof st,
-            "AIM pc=%d loc=%d cand=%d fov=%d hid=%d tgt=%d lock=%d ovr=%d pred=%d sil=%d hook=%d hpHook=%d hpCalls=%d w2sHook=%d w2sCalls=%d | eY=%.1f eP=%.1f %s",
-            W.nPc, W.nLocal, (int)W.cands.size(), inFov, hid, best ? 1 : 0, (int)(W.lockedPc != 0),
-            overriding ? 1 : 0, predicted ? 1 : 0, (int)aim::silent, (int)Silent::g_hooked,
-            (int)Silent::g_healthHooked, Silent::g_healthCalls.load(),
-            (int)Silent::g_w2sHooked, Silent::g_w2sCalls.load(),
-            eY, eP, overriding ? "OVERRIDE" : (aim::silent ? "silent" : (wrote ? "writing" : "idle")));
+            "AIM pc=%d cand=%d fov=%d vis=%d hid=%d tgt=%d lock=%d ovr=%d pred=%d rc=%d | eY=%.1f eP=%.1f %s",
+            W.nPc, (int)W.cands.size(), inFov, vis, hid, best ? 1 : 0, (int)(W.lockedPc != 0),
+            overriding ? 1 : 0, predicted ? 1 : 0, (int)(A.mLinecast2 != nullptr),
+            eY, eP,
+            overriding ? "OVERRIDE" : (wrote ? "writing" : "idle"));
         Status(dl, ImVec2(10,113), st);
-
-        ModuleCheck::Run();
-        char st2[220];
-        std::snprintf(st2, sizeof st2,
-            "MODCHECK done=%d base=0x%llx real=0x%llx calc=0x%llx match=%d plaus=%d",
-            (int)ModuleCheck::done,
-            (unsigned long long)ModuleCheck::base, (unsigned long long)ModuleCheck::real,
-            (unsigned long long)ModuleCheck::computed, (int)ModuleCheck::match, (int)ModuleCheck::plausible);
-        Status(dl, ImVec2(10,130), st2);
     }
 }
 
 void aim::run()
 {
     if (!il::Init()) return;
-    Silent::Install();   // один раз, безопасно вызывать каждый кадр — внутри своя защита от повторной установки
 
     ImDrawList* draw = ImGui::GetBackgroundDrawList();
     float screenWidth  = ImGui::GetIO().DisplaySize.x;
@@ -712,7 +588,6 @@ void aim::run()
         W.lockedPc = 0;
         W.lostSince = -1.0;
         W.overrideUntil = -1.0;
-        Silent::Clear();
     }
 
     if (aim::draw_fov) {
