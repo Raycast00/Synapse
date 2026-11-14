@@ -444,7 +444,7 @@ namespace
     {
         if (items.empty()) return;
         const ImU32 bg     = IM_COL32(26, 16, 14, 215);
-        const ImU32 border = IM_COL32(70, 46, 40, 255);
+        const ImU32 border = IM_COL32(95, 62, 54, 255);
 
         std::vector<ImVec2> sizes(items.size());
         float totalW = 0.f, rowH = 0.f;

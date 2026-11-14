@@ -9,7 +9,7 @@ namespace aim
     inline bool automatic_fire = false;
 
     inline bool draw_fov = false;
-    inline float fov_radius = 30.f;
+    inline float fov_radius = 15.f;
     inline float fov_color[4]{ 1.f, 1.f, 1.f, 0.5f };
 
     inline float aimbot_smoothing = 15.f;
