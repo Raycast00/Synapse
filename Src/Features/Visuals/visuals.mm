@@ -53,6 +53,15 @@ namespace
         constexpr float PillPadY     = 3.f;
         constexpr float PillGap      = 4.f;
         constexpr float PillRounding = 4.f;
+
+                // GrenadeManager (ScarletWork.Game.Grenades) — живые данные превью, которые игра
+        // сама пересчитывает, пока чека выдернута, но бросок ещё не случился.
+        constexpr uintptr_t GM_AimParameters   = 0xD0;   // не null = сейчас держишь гранату на прицеле
+        constexpr uintptr_t GM_PreviewPosition = 0x100;  // Vector3
+        constexpr uintptr_t GM_PreviewVelocity = 0x10C;  // Vector3
+
+        constexpr float PreviewArcSeconds = 1.2f;  // не из дампа, сколько секунд дуги рисовать — подбирать на глаз
+        constexpr int   PreviewArcSteps   = 48;
     }
 
     struct Api
@@ -61,6 +70,7 @@ namespace
         std::string missing;
         void *kPlayerController{}, *kPlayer{}, *kSkeleton{}, *kBomb{}, *kSMR{};
         void *kGrenade{}, *kPhysics{};
+        void *kGrenadeManager{};
         void *mGetTransform{}, *mGetPosition{}, *mW2S{}, *mCamMain{};
         void *mGetBounds{}, *mGetCompInChildren{}, *mObjGetName{}, *mGetBones{}, *mGetHeadBone{}, *mGetParent{};
         void *mScreenW{}, *mScreenH{};
@@ -114,6 +124,8 @@ namespace
         A.mGrenVisible  = il::Method(A.kGrenade, "get_IsVisible", 0);       // опционально
         A.mGrenResting  = il::Method(A.kGrenade, "get_IsResting", 0);       // опционально
         A.mGravity      = il::Method(A.kPhysics, "get_gravity", 0);        // опционально
+
+        A.kGrenadeManager = il::Class("ScarletWork.Game.Grenades", "GrenadeManager", "Assembly-CSharp");
 
         need(A.kPlayerController, "PlayerController"); need(A.kSkeleton, "PlayerSkeleton");
         need(kComponent, "Component"); need(kTransform, "Transform"); need(kCamera, "Camera");
@@ -630,6 +642,42 @@ namespace
             else ++it;
         }
     }
+
+    void DrawGrenadePreview(ImDrawList* dl, float sx, float sy, int sh)
+    {
+        if (!A.kGrenadeManager || !A.mGravity) return;
+
+        std::vector<uintptr_t> mgrs = il::FindObjectsOfType(A.kGrenadeManager);
+        if (mgrs.empty()) return;
+        uintptr_t gm = mgrs[0];
+
+        uintptr_t aimParams = il::Read<uintptr_t>(gm + Cfg::GM_AimParameters);
+        if (!il::ValidPtr(aimParams)) return;   // не держишь гранату сейчас — рисовать нечего
+
+        V3 pos = il::Read<V3>(gm + Cfg::GM_PreviewPosition);
+        V3 vel = il::Read<V3>(gm + Cfg::GM_PreviewVelocity);
+        if (!Finite(pos) || !Finite(vel)) return;
+
+        V3 gra = il::InvokeBoxed<V3>(A.mGravity, nullptr, nullptr);
+        if (!Finite(gra)) return;
+
+        ImU32 col = Col(visuals::grenade_trajectory_color);
+        V3 prev = pos;
+        for (int i = 1; i <= Cfg::PreviewArcSteps; i++) {
+            float t = Cfg::PreviewArcSeconds * (float)i / Cfg::PreviewArcSteps;
+            V3 p{ pos.x + vel.x * t + 0.5f * gra.x * t * t,
+                  pos.y + vel.y * t + 0.5f * gra.y * t * t,
+                  pos.z + vel.z * t + 0.5f * gra.z * t * t };
+            if (!Finite(p)) break;
+            ImVec2 a, b;
+            if (W2S(prev, sx, sy, (float)sh, a) && W2S(p, sx, sy, (float)sh, b))
+                dl->AddLine(a, b, col, 2.4f);
+            prev = p;
+        }
+        // Точка предполагаемого приземления — без учёта отскоков от стен, честно, как и раньше.
+        ImVec2 land;
+        if (W2S(prev, sx, sy, (float)sh, land)) dl->AddCircleFilled(land, 4.5f, col, 12);
+    }
 }
 
 void visuals::run()
@@ -769,7 +817,10 @@ void visuals::run()
         }
     } else g_bombMax = 0.f;
 
-    if (visualize_grenade_trajectory) DrawGrenadeTrajectories(dl, sx, sy, sh);
+    if (visualize_grenade_trajectory) {
+        DrawGrenadePreview(dl, sx, sy, sh);       // пока граната в руке
+        DrawGrenadeTrajectories(dl, sx, sy, sh);  // после броска — живой след + короткий прогноз
+    }
 
     StatusLine(dl, true, camOk);
 }
