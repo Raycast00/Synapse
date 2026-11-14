@@ -46,18 +46,16 @@ namespace
         constexpr float  DefaultPitchLimit = 80.f;
         constexpr float  OverrideYawDegPerFrame = 12.f;
         constexpr double OverrideHoldSec        = 0.25;
-        constexpr float  PredictLeadSec  = 0.12f;
-        constexpr float  MaxSaneSpeed    = 15.f;
     }
 
     struct Api
     {
         bool ready = false;
         std::string missing;
-        void *kPC{}, *kPlayer{}, *kSkel{}, *kPlayerLock{}, *kRigidbody{};
+        void *kPC{}, *kPlayer{}, *kSkel{}, *kPlayerLock{};
         void *mGetTransform{}, *mGoGetTransform{}, *mGetCompInChildren{}, *mGetPos{}, *mGetFwd{}, *mRotate4{};
         void *mW2S{}, *mCamMain{}, *mScreenW{}, *mScreenH{}, *mGetHeadBone{};
-        void *mTeam{}, *mIsAlive{}, *mHealth{}, *mLookXLimit{}, *mGetVelocity{};
+        void *mTeam{}, *mIsAlive{}, *mHealth{}, *mLookXLimit{};
         void *kSMR{}, *mGetBones{};
     } A;
 
@@ -72,7 +70,6 @@ namespace
         A.kSkel       = il::Class("ScarletWork.Game", "PlayerSkeleton", "Assembly-CSharp");
         A.kPlayerLock = il::Class("ScarletWork.Game", "PlayerLock", "Assembly-CSharp");
         A.kPlayer     = il::Class("Photon.Realtime", "Player", "PhotonRealtime");
-        A.kRigidbody  = il::Class("UnityEngine", "Rigidbody", "UnityEngine.PhysicsModule");
         A.kSMR        = il::Class("UnityEngine", "SkinnedMeshRenderer", core);
         A.mGetBones   = il::Method(A.kSMR, "get_bones", 0);
 
@@ -97,7 +94,6 @@ namespace
         A.mIsAlive           = il::Method(A.kPlayer, "get_IsAlive", 0);
         A.mHealth            = il::Method(A.kPC, "get_Health", 0);
         A.mLookXLimit        = il::Method(A.kPlayerLock, "get_LookXLimit", 0);
-        A.mGetVelocity       = il::Method(A.kRigidbody, "get_velocity", 0);
 
         need(A.kPC, "PlayerController"); need(A.kSkel, "PlayerSkeleton"); need(A.kPlayerLock, "PlayerLock");
         need(A.mGetTransform, "Component.get_transform"); need(A.mGoGetTransform, "GameObject.get_transform");
@@ -158,17 +154,6 @@ namespace
     {
         void* tr = il::Invoke(A.mGetTransform, comp, nullptr);
         return PosOfTransform(tr, out);
-    }
-
-    bool VelocityOfRigidbody(void* obj, V3& out)
-    {
-        if (!A.mGetVelocity || !A.kRigidbody || !il::ValidPtr((uintptr_t)obj)) return false;
-        void* cls = il::ClassOf(obj);
-        if (cls != A.kRigidbody) return false;
-        out = il::InvokeBoxed<V3>(A.mGetVelocity, obj, nullptr);
-        if (!Finite(out)) return false;
-        float sp = std::sqrt(out.x * out.x + out.y * out.y + out.z * out.z);
-        return sp <= Cfg::MaxSaneSpeed;
     }
 
     struct Cand
@@ -276,24 +261,23 @@ namespace
     double g_nextRoll = 0.0;
     bool   g_rollHead = true;
 
-    bool AimPoint(const Cand& c, V3& out, void*& bone)
+    bool AimPoint(const Cand& c, V3& out)
     {
-        bone = nullptr;
         auto head = [&]() -> bool {
-            if (il::ValidPtr(c.headBone) && PosOfTransform((void*)c.headBone, out)) { bone = (void*)c.headBone; return true; }
+            if (il::ValidPtr(c.headBone) && PosOfTransform((void*)c.headBone, out)) return true;
             if (A.mGetHeadBone) {
                 void* t = il::Invoke(A.mGetHeadBone, (void*)c.skeleton, nullptr);
-                if (PosOfTransform(t, out)) { bone = t; return true; }
+                if (PosOfTransform(t, out)) return true;
             }
             uintptr_t rb = il::Read<uintptr_t>(c.skeleton + Cfg::Skel_HeadBone);
-            if (il::ValidPtr(rb) && PosOfComponent((void*)rb, out)) { bone = (void*)rb; return true; }
+            if (il::ValidPtr(rb) && PosOfComponent((void*)rb, out)) return true;
             return false;
         };
         auto chest = [&]() -> bool {
             uintptr_t rb = il::Read<uintptr_t>(c.skeleton + Cfg::Skel_ChestBone);
-            if (il::ValidPtr(rb) && PosOfComponent((void*)rb, out)) { bone = (void*)rb; return true; }
+            if (il::ValidPtr(rb) && PosOfComponent((void*)rb, out)) return true;
             rb = il::Read<uintptr_t>(c.skeleton + Cfg::Skel_PelvisBone);
-            if (il::ValidPtr(rb) && PosOfComponent((void*)rb, out)) { bone = (void*)rb; return true; }
+            if (il::ValidPtr(rb) && PosOfComponent((void*)rb, out)) return true;
             return false;
         };
 
@@ -401,25 +385,25 @@ namespace
         D.lastY = cur.yaw; D.lastP = cur.pitch; D.have = true;
 
         // Финальная проверка цели: команда, смерть, скрыт раундом/спектатором, попадание в FOV
-        auto qualifies = [&](const Cand& c, ImVec2& s, float& d, V3& hitPos, void*& bone) -> bool {
+        auto qualifies = [&](const Cand& c, ImVec2& s, float& d, V3& hitPos) -> bool {
             if (W.haveLocal && !W.localTeam.empty() && c.team == W.localTeam) return false;
             if (IsDead(c)) return false;
             if (IsAlwaysHidden(c)) return false;
-            if (!AimPoint(c, hitPos, bone)) return false;
+            if (!AimPoint(c, hitPos)) return false;
             if (!W2S(cam, hitPos, sx, sy, (float)sh, s)) return false;
             d = std::hypot(s.x - center.x, s.y - center.y);
             return true;
         };
 
-        const Cand* best = nullptr; V3 bestPos{}; void* bestBone = nullptr;
+        const Cand* best = nullptr; V3 bestPos{};
         int inFov = 0;
 
         if (W.lockedPc) {
             for (const Cand& c : W.cands) {
                 if (c.pc != W.lockedPc) continue;
-                ImVec2 s; float d; V3 hp; void* bone;
-                if (qualifies(c, s, d, hp, bone) && d < aim::fov_radius * Cfg::KeepRadiusMul) {
-                    best = &c; bestPos = hp; bestBone = bone;
+                ImVec2 s; float d; V3 hp;
+                if (qualifies(c, s, d, hp) && d < aim::fov_radius * Cfg::KeepRadiusMul) {
+                    best = &c; bestPos = hp;
                     W.lostSince = -1.0;
                 } else if (W.lostSince < 0.0) {
                     W.lostSince = now;
@@ -437,29 +421,17 @@ namespace
         for (const Cand& c : W.cands) {
             if (c.pc == W.lockedPc) continue;
 
-            ImVec2 s; float d; V3 hitPos; void* bone;
-            if (!qualifies(c, s, d, hitPos, bone)) continue;
+            ImVec2 s; float d; V3 hitPos;
+            if (!qualifies(c, s, d, hitPos)) continue;
             if (d >= aim::fov_radius) continue;
             inFov++;
 
             if (!best) {
                 best = &c;
                 bestPos = hitPos;
-                bestBone = bone;
             }
         }
         if (best) W.lockedPc = best->pc;
-
-        bool predicted = false;
-        if (best && aim::aimbot_prediction) {
-            V3 vel;
-            if (VelocityOfRigidbody(bestBone, vel)) {
-                bestPos.x += vel.x * Cfg::PredictLeadSec;
-                bestPos.y += vel.y * Cfg::PredictLeadSec;
-                bestPos.z += vel.z * Cfg::PredictLeadSec;
-                predicted = true;
-            }
-        }
 
         float eY = 0.f, eP = 0.f, cmdY = 0.f;
         bool wrote = false;
@@ -498,9 +470,9 @@ namespace
         W.lastCmdY = cmdY;
 
         std::snprintf(st, sizeof st,
-            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d pred=%d | eY=%.1f eP=%.1f %s",
+            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d | eY=%.1f eP=%.1f %s",
             W.nPc, (int)W.cands.size(), inFov, best ? 1 : 0, (int)(W.lockedPc != 0),
-            overriding ? 1 : 0, predicted ? 1 : 0,
+            overriding ? 1 : 0,
             eY, eP,
             overriding ? "OVERRIDE" : (wrote ? "writing" : "idle"));
         Status(dl, ImVec2(10,113), st);

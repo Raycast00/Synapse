@@ -220,7 +220,6 @@ static bool   g_tLeave = false;
                     ImGui::Checkbox("Silent", &aim::silent);
                 }
                 ImGui::Checkbox("Automatic Fire", &aim::automatic_fire);
-                ImGui::Checkbox("Prediction", &aim::aimbot_prediction);
 
                 ImGui::Checkbox("Draw FOV", &aim::draw_fov);
                 ImGui::SameLine();
