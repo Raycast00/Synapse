@@ -122,7 +122,7 @@ static bool   g_tLeave = false;
     visuals::run();
     aim::run();
     rage::run();
-    //misc::run();
+    misc::run();
 
     // Кнопка вызова меню (всегда видна)
     ImGui::SetNextWindowPos(ImVec2(20, 60), ImGuiCond_FirstUseEver);
@@ -271,6 +271,10 @@ static bool   g_tLeave = false;
             if (ImGui::BeginTabItem("Misc"))
             {
                 ImGui::Checkbox("Thirdperson", &misc::thirdperson);
+                if (misc::thirdperson)
+                {
+                    ImGui::SliderFloat("Distance", &misc::thirdperson_distance, 1.0f, 8.0f, "%.1f");
+                }
 
                 ImGui::EndTabItem();
             }
