@@ -30,7 +30,7 @@ namespace visuals
     inline bool weaponIcon = false;
 
     inline bool distance = false;
-    inline float distance_color[4]{ 1.f, 1.f, 1.f, 1.f };
+    inline float distance_color[4]{ 0.75f, 0.70f, 0.65f, 1.f };
 
     inline bool tracer = false;
     inline float tracer_color[4]{ 1.f, 1.f, 1.f, 1.f };
