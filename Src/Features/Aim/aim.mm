@@ -264,11 +264,13 @@ namespace
     bool AimPoint(const Cand& c, V3& out)
     {
         auto head = [&]() -> bool {
-            if (il::ValidPtr(c.headBone) && PosOfTransform((void*)c.headBone, out)) return true;
+            // Настоящий метод игры — приоритетный источник, он должен отслеживать голову в любой позе.
             if (A.mGetHeadBone) {
                 void* t = il::Invoke(A.mGetHeadBone, (void*)c.skeleton, nullptr);
                 if (PosOfTransform(t, out)) return true;
             }
+            // Эвристика "самая высокая кость скелета" — только запасной вариант, нестабилен при приседе.
+            if (il::ValidPtr(c.headBone) && PosOfTransform((void*)c.headBone, out)) return true;
             uintptr_t rb = il::Read<uintptr_t>(c.skeleton + Cfg::Skel_HeadBone);
             if (il::ValidPtr(rb) && PosOfComponent((void*)rb, out)) return true;
             return false;
