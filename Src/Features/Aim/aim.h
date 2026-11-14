@@ -21,7 +21,7 @@ namespace aim
     inline const char* aimbot_hitboxes[] = { "Head", "Chest", "Random" };
 
     // Other
-    inline int aim_visualize_bullet = 0;
+    inline bool aim_visualize_bullet = false;
 
     // Weapon
     inline bool RCS = false;
