@@ -47,6 +47,12 @@ namespace
         constexpr float  TrailMaxAgeSec = 2.4f;   // с запасом сверх подтверждённого GrenadeManager.MaxThrowAge = 2
         constexpr float  TrailPointGap  = 0.05f;  // новая сырая точка не чаще, чем раз на столько мировых юнитов
         constexpr float  SmoothSegLen   = 0.12f;  // целевая длина одного кусочка сглаженной кривой
+
+        // Верхний ряд пилюль (Health Text / Names / Distance) — стиль не из дампа, подбирать на глаз.
+        constexpr float PillPadX     = 7.f;
+        constexpr float PillPadY     = 3.f;
+        constexpr float PillGap      = 4.f;
+        constexpr float PillRounding = 4.f;
     }
 
     struct Api
@@ -429,6 +435,42 @@ namespace
         dl->AddLine(b, ImVec2(b.x - lw, b.y), col);  dl->AddLine(b, ImVec2(b.x, b.y - lh), col);
     }
 
+    // ---- Верхний ряд пилюль: Health Text (слева) — Names (центр) — Distance (справа). ----
+    // Весь ряд центрируется над боксом как единая группа: если элемента нет, оставшиеся не "съезжают"
+    // на его место, а пересчитывают общий центр заново.
+    struct PillItem { std::string text; ImU32 textCol; };
+
+    void DrawPillRow(ImDrawList* dl, float centerX, float y, const std::vector<PillItem>& items)
+    {
+        if (items.empty()) return;
+        const ImU32 bg     = IM_COL32(26, 16, 14, 215);
+        const ImU32 border = IM_COL32(70, 46, 40, 255);
+
+        std::vector<ImVec2> sizes(items.size());
+        float totalW = 0.f, rowH = 0.f;
+        for (size_t i = 0; i < items.size(); i++) {
+            ImVec2 ts = ImGui::CalcTextSize(items[i].text.c_str());
+            sizes[i] = ImVec2(ts.x + Cfg::PillPadX * 2.f, ts.y + Cfg::PillPadY * 2.f);
+            rowH = std::max(rowH, sizes[i].y);
+            totalW += sizes[i].x;
+            if (i + 1 < items.size()) totalW += Cfg::PillGap;
+        }
+
+        float x = centerX - totalW * 0.5f;
+        for (size_t i = 0; i < items.size(); i++) {
+            ImVec2 tl(x, y), br(x + sizes[i].x, y + rowH);
+            dl->AddRectFilled(tl, br, bg, Cfg::PillRounding);
+            dl->AddRect(tl, br, border, Cfg::PillRounding, 0, 1.0f);
+
+            ImVec2 ts = ImGui::CalcTextSize(items[i].text.c_str());
+            ImVec2 tp(tl.x + (sizes[i].x - ts.x) * 0.5f, tl.y + (rowH - ts.y) * 0.5f);
+            dl->AddText(ImVec2(tp.x + 1, tp.y + 1), IM_COL32(0, 0, 0, 220), items[i].text.c_str());
+            dl->AddText(tp, items[i].textCol, items[i].text.c_str());
+
+            x += sizes[i].x + Cfg::PillGap;
+        }
+    }
+
     void StatusLine(ImDrawList* dl, bool ilReady, bool camOk)
     {
         if (!kStatus) return;
@@ -676,33 +718,40 @@ void visuals::run()
             }
         }
 
-        if (healthBar || healthBarText) {
+        // Вертикальная полоска здоровья сбоку от бокса — отдельно от верхнего ряда пилюль.
+        if (healthBar) {
             float frac = std::clamp((float)hp / Cfg::MaxHealth, 0.f, 1.f);
-            if (healthBar) {
-                dl->AddRectFilled(ImVec2(a.x - 6, a.y - 1), ImVec2(a.x - 3, b.y + 1), IM_COL32(0, 0, 0, 180));
-                dl->AddRectFilled(ImVec2(a.x - 5, b.y - h * frac), ImVec2(a.x - 4, b.y), Col(healthbar_color));
-            }
-            if (healthBarText) {
-                char t[16]; std::snprintf(t, sizeof t, "%d", hp);
-                Text(dl, ImVec2(a.x - 6 - ImGui::CalcTextSize(t).x, b.y - h * frac), IM_COL32(255, 255, 255, 255), t, false);
-            }
+            dl->AddRectFilled(ImVec2(a.x - 6, a.y - 1), ImVec2(a.x - 3, b.y + 1), IM_COL32(0, 0, 0, 180));
+            dl->AddRectFilled(ImVec2(a.x - 5, b.y - h * frac), ImVec2(a.x - 4, b.y), Col(healthbar_color));
         }
 
-        float topY = a.y - ImGui::GetTextLineHeight() - 2.f;
-        if (names && !e.name.empty()) Text(dl, ImVec2(sf.x, topY), Col(names_color), e.name.c_str(), true);
-
-        float botY = b.y + 2.f;
-        if (weaponText && !e.weapon.empty()) {
-            Text(dl, ImVec2(sf.x, botY), Col(weapon_text_color), e.weapon.c_str(), true);
-            botY += ImGui::GetTextLineHeight();
+        // Верхний ряд пилюль: Health Text (слева) — Names (центр) — Distance (справа).
+        // Ряд центрируется как единая группа: если элемента нет, остальные пересчитывают центр заново.
+        std::vector<PillItem> row;
+        if (healthBarText) {
+            char t[16]; std::snprintf(t, sizeof t, "%d", hp);
+            row.push_back({ t, IM_COL32(255, 255, 255, 255) });
         }
+        if (names && !e.name.empty())
+            row.push_back({ e.name, Col(names_color) });
         if (distance && F.haveLocal) {
             V3 p = WorldPos((void*)e.pc);
             float d = std::sqrt((p.x - F.localPos.x) * (p.x - F.localPos.x) +
                                 (p.y - F.localPos.y) * (p.y - F.localPos.y) +
                                 (p.z - F.localPos.z) * (p.z - F.localPos.z));
-            char t[24]; std::snprintf(t, sizeof t, "%.0f m", d);
-            Text(dl, ImVec2(sf.x, botY), Col(distance_color), t, true);
+            char t[24]; std::snprintf(t, sizeof t, "%.0fm", d);
+            row.push_back({ t, Col(distance_color) });
+        }
+        if (!row.empty()) {
+            float rowH = ImGui::GetTextLineHeight() + Cfg::PillPadY * 2.f;
+            float topY = a.y - rowH - 3.f;
+            DrawPillRow(dl, sf.x, topY, row);
+        }
+
+        float botY = b.y + 2.f;
+        if (weaponText && !e.weapon.empty()) {
+            Text(dl, ImVec2(sf.x, botY), Col(weapon_text_color), e.weapon.c_str(), true);
+            botY += ImGui::GetTextLineHeight();
         }
         if (tracer) dl->AddLine(ImVec2(disp.x * 0.5f, disp.y), sf, Col(tracer_color));
     }
