@@ -206,9 +206,14 @@ static bool   g_tLeave = false;
 
                 // GRENADE
                 ImGui::SeparatorText("Grenade");
+
                 ImGui::Checkbox("Visualize Trajectory", &visuals::visualize_grenade_trajectory);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## Trajectory Color", visuals::grenade_trajectory_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+
+                ImGui::SeparatorText("Other");
+
+                ImGui::Checkbox("Visualize Penetration", &visuals::visualize_penetration);
             }
 
             if (ImGui::BeginTabItem("Aim"))
@@ -270,10 +275,18 @@ static bool   g_tLeave = false;
 
             if (ImGui::BeginTabItem("Misc"))
             {
-                ImGui::Checkbox("Thirdperson", &misc::thirdperson);
-                if (misc::thirdperson)
+                ImGui::SeparatorText("Silent Test", &misc::silent_test);
+                if (misc::silent_test)
                 {
-                    ImGui::SliderFloat("Distance", &misc::thirdperson_distance, 1.0f, 8.0f, "%.1f");
+                    ImGui::SliderFloat("Test Pitch", &misc::test_pitch, -3.15f, 3.15f, "%.2f");
+                    ImGui::SliderFloat("Test Yaw",   &misc::test_yaw,   -3.15f, 3.15f, "%.2f");
+
+                    static bool use_degrees = false;
+                    ImGui::Checkbox("Degrees", &use_degrees);
+                    if (use_degrees) {
+                        ImGui::SliderFloat("Pitch (deg)", &misc::test_pitch, -180.f, 180.f, "%.0f");
+                        ImGui::SliderFloat("Yaw (deg)",   &misc::test_yaw,   -180.f, 180.f, "%.0f");
+                    }
                 }
 
                 ImGui::EndTabItem();

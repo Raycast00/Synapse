@@ -42,4 +42,7 @@ namespace visuals
     // Grenade
     inline bool visualize_grenade_trajectory = false;
     inline float grenade_trajectory_color[4]{ 1.f, 1.f, 1.f, 0.75f };
+
+    // Other
+    inline bool visualize_penetration = false;
 }

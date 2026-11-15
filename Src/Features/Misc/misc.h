@@ -2,6 +2,7 @@ namespace misc
 {
     void run();
 
-    inline bool thirdperson = false;
-    inline float thirdperson_distance = 3.0f;
+    inline bool silent_test = false;
+    inline float test_pitch = 0.0f;
+    inline float test_yaw   = 0.0f;
 }

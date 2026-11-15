@@ -261,25 +261,28 @@ namespace
     double g_nextRoll = 0.0;
     bool   g_rollHead = true;
 
-    bool AimPoint(const Cand& c, V3& out)
+    enum class HeadSrc { None, Method, Heuristic, RawField, Chest };
+
+    bool AimPoint(const Cand& c, V3& out, HeadSrc& src)
     {
+        src = HeadSrc::None;
         auto head = [&]() -> bool {
             // Настоящий метод игры — приоритетный источник, он должен отслеживать голову в любой позе.
             if (A.mGetHeadBone) {
                 void* t = il::Invoke(A.mGetHeadBone, (void*)c.skeleton, nullptr);
-                if (PosOfTransform(t, out)) return true;
+                if (PosOfTransform(t, out)) { src = HeadSrc::Method; return true; }
             }
             // Эвристика "самая высокая кость скелета" — только запасной вариант, нестабилен при приседе.
-            if (il::ValidPtr(c.headBone) && PosOfTransform((void*)c.headBone, out)) return true;
+            if (il::ValidPtr(c.headBone) && PosOfTransform((void*)c.headBone, out)) { src = HeadSrc::Heuristic; return true; }
             uintptr_t rb = il::Read<uintptr_t>(c.skeleton + Cfg::Skel_HeadBone);
-            if (il::ValidPtr(rb) && PosOfComponent((void*)rb, out)) return true;
+            if (il::ValidPtr(rb) && PosOfComponent((void*)rb, out)) { src = HeadSrc::RawField; return true; }
             return false;
         };
         auto chest = [&]() -> bool {
             uintptr_t rb = il::Read<uintptr_t>(c.skeleton + Cfg::Skel_ChestBone);
-            if (il::ValidPtr(rb) && PosOfComponent((void*)rb, out)) return true;
+            if (il::ValidPtr(rb) && PosOfComponent((void*)rb, out)) { src = HeadSrc::Chest; return true; }
             rb = il::Read<uintptr_t>(c.skeleton + Cfg::Skel_PelvisBone);
-            if (il::ValidPtr(rb) && PosOfComponent((void*)rb, out)) return true;
+            if (il::ValidPtr(rb) && PosOfComponent((void*)rb, out)) { src = HeadSrc::Chest; return true; }
             return false;
         };
 
@@ -324,6 +327,9 @@ namespace
         dl->AddText(ImVec2(pos.x + 1, pos.y + 1), IM_COL32(0, 0, 0, 255), t);
         dl->AddText(pos, IM_COL32(255, 160, 0, 255), t);
     }
+
+    static float s_lastHeadY = 0.f;
+    static bool  s_haveLastHeadY = false;
 
     void AimbotFrame(ImDrawList* dl, ImVec2 center)
     {
@@ -387,25 +393,26 @@ namespace
         D.lastY = cur.yaw; D.lastP = cur.pitch; D.have = true;
 
         // Финальная проверка цели: команда, смерть, скрыт раундом/спектатором, попадание в FOV
-        auto qualifies = [&](const Cand& c, ImVec2& s, float& d, V3& hitPos) -> bool {
+        auto qualifies = [&](const Cand& c, ImVec2& s, float& d, V3& hitPos, HeadSrc& src) -> bool {
             if (W.haveLocal && !W.localTeam.empty() && c.team == W.localTeam) return false;
             if (IsDead(c)) return false;
             if (IsAlwaysHidden(c)) return false;
-            if (!AimPoint(c, hitPos)) return false;
+            if (!AimPoint(c, hitPos, src)) return false;
             if (!W2S(cam, hitPos, sx, sy, (float)sh, s)) return false;
             d = std::hypot(s.x - center.x, s.y - center.y);
             return true;
         };
 
         const Cand* best = nullptr; V3 bestPos{};
+        HeadSrc bestSrc = HeadSrc::None;
         int inFov = 0;
 
         if (W.lockedPc) {
             for (const Cand& c : W.cands) {
                 if (c.pc != W.lockedPc) continue;
-                ImVec2 s; float d; V3 hp;
-                if (qualifies(c, s, d, hp) && d < aim::fov_radius * Cfg::KeepRadiusMul) {
-                    best = &c; bestPos = hp;
+                ImVec2 s; float d; V3 hp; HeadSrc src;
+                if (qualifies(c, s, d, hp, src) && d < aim::fov_radius * Cfg::KeepRadiusMul) {
+                    best = &c; bestPos = hp; bestSrc = src;
                     W.lostSince = -1.0;
                 } else if (W.lostSince < 0.0) {
                     W.lostSince = now;
@@ -423,14 +430,15 @@ namespace
         for (const Cand& c : W.cands) {
             if (c.pc == W.lockedPc) continue;
 
-            ImVec2 s; float d; V3 hitPos;
-            if (!qualifies(c, s, d, hitPos)) continue;
+            ImVec2 s; float d; V3 hitPos; HeadSrc src;
+            if (!qualifies(c, s, d, hitPos, src)) continue;
             if (d >= aim::fov_radius) continue;
             inFov++;
 
             if (!best) {
                 best = &c;
                 bestPos = hitPos;
+                bestSrc = src;
             }
         }
         if (best) W.lockedPc = best->pc;
@@ -471,12 +479,31 @@ namespace
         }
         W.lastCmdY = cmdY;
 
+        float headYDelta = 0.f;
+        if (best) {
+            if (s_haveLastHeadY) headYDelta = bestPos.y - s_lastHeadY;
+            s_lastHeadY = bestPos.y;
+            s_haveLastHeadY = true;
+        } else {
+            s_haveLastHeadY = false;
+        }
+
+        const char* srcName = "none";
+        switch (bestSrc) {
+            case HeadSrc::Method:    srcName = "Method";    break;
+            case HeadSrc::Heuristic: srcName = "Heuristic"; break;
+            case HeadSrc::RawField:  srcName = "RawField";  break;
+            case HeadSrc::Chest:     srcName = "Chest";     break;
+            default: break;
+        }
+
         std::snprintf(st, sizeof st,
-            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d | eY=%.1f eP=%.1f %s",
+            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d | eY=%.1f eP=%.1f %s | headSrc=%s headY=%.2f dY=%+.2f",
             W.nPc, (int)W.cands.size(), inFov, best ? 1 : 0, (int)(W.lockedPc != 0),
             overriding ? 1 : 0,
             eY, eP,
-            overriding ? "OVERRIDE" : (wrote ? "writing" : "idle"));
+            overriding ? "OVERRIDE" : (wrote ? "writing" : "idle"),
+            srcName, best ? bestPos.y : 0.f, headYDelta);
         Status(dl, ImVec2(10,113), st);
     }
 }
