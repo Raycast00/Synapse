@@ -275,7 +275,7 @@ static bool   g_tLeave = false;
 
             if (ImGui::BeginTabItem("Misc"))
             {
-                ImGui::Checkbox("Silent Test", &misc::silent_test)
+                ImGui::Checkbox("Silent Test", &misc::silent_test);
                 if (misc::silent_test)
                 {
                     ImGui::SliderFloat("Test Pitch", &misc::test_pitch, -3.15f, 3.15f, "%.2f");
