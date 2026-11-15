@@ -210,10 +210,6 @@ static bool   g_tLeave = false;
                 ImGui::Checkbox("Visualize Trajectory", &visuals::visualize_grenade_trajectory);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## Trajectory Color", visuals::grenade_trajectory_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-
-                ImGui::SeparatorText("Other");
-
-                ImGui::Checkbox("Visualize Penetration", &visuals::visualize_penetration);
             }
 
             if (ImGui::BeginTabItem("Aim"))
@@ -255,6 +251,13 @@ static bool   g_tLeave = false;
                 ImGui::SeparatorText("Player");
 
                 ImGui::Checkbox("Move Before Timer", &rage::MBT);
+
+                ImGui::Checkbox("No Clip", &rage::flight);
+                if (rage::flight)
+                {
+                    ImGui::SliderFloat("Speed", &rage::flight_speed, 1.f, 20.f, "%.1f");
+                }
+
                 ImGui::Checkbox("Wallbang", &rage::wallbang);
                 ImGui::Checkbox("No Fall Damage", &rage::no_fall_damage);
 

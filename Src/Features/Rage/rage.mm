@@ -58,11 +58,11 @@ namespace off {
     constexpr uintptr_t arms_NextDryFire      = 0x1C0;  // float
 
     // PlayerMovement
-    constexpr uintptr_t pm_IsFreezing = 0x164;  // bool, читается в приватном get_Frozen()
-    constexpr uintptr_t pm_IsGrounded = 0x15C;  // bool, public _isGrounded
+    constexpr uintptr_t pm_IsFreezing    = 0x164;  // bool, читается в приватном get_Frozen()
+    constexpr uintptr_t pm_IsGrounded    = 0x15C;  // bool, public _isGrounded
 
-    constexpr uintptr_t pm_NoclipEnabled = 0x38; // public bool NoclipEnabled
-    constexpr uintptr_t pm_NoclipSpeed   = 0x3C; // private float _noclipSpeed
+    constexpr uintptr_t pm_NoclipEnabled = 0x38;   // public bool NoclipEnabled — подтверждено в dump.cs
+    constexpr uintptr_t pm_NoclipSpeed   = 0x3C;   // private float _noclipSpeed — подтверждено в dump.cs
 
     constexpr uintptr_t gc_FriendlyFire = 0x20;   // private bool _friendlyFire
     constexpr uintptr_t gc_RoundsToWin  = 0x94;   // <RoundsToWin>k__BackingField
@@ -191,27 +191,50 @@ static void applyNoFallDamage()
     if (!ok(pc)) return;
     uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement);
     if (!ok(mv)) return;
-    
+
     Write<float>(mv + 0xB8, 0.0f);
     Write<float>(mv + 0xB4, 0.0f);
+}
+
+// PlayerMovement.EnableNoclip()/DisableNoclip() — настоящие методы игры, не наш хак. Зовём по изменению
+// переключателя (edge-triggered), а не каждый кадр, раз это явно "включить/выключить", а не непрерывное действие.
+static void applyFlight()
+{
+    uintptr_t pc = localPlayerController();
+    if (!ok(pc)) return;
+    uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement);
+    if (!ok(mv)) return;
+
+    static bool lastFlight = false;
+    if (rage::flight != lastFlight) {
+        lastFlight = rage::flight;
+        static void* klass    = IL2CPP::Class("", "PlayerMovement", "Assembly-CSharp");
+        static void* mEnable  = IL2CPP::Method(klass, "EnableNoclip", 0);
+        static void* mDisable = IL2CPP::Method(klass, "DisableNoclip", 0);
+        if (rage::flight) { if (mEnable)  IL2CPP::Invoke(mEnable,  (void*)mv, nullptr); }
+        else              { if (mDisable) IL2CPP::Invoke(mDisable, (void*)mv, nullptr); }
+    }
+
+    if (rage::flight)
+        Write<float>(mv + off::pm_NoclipSpeed, rage::flight_speed);
 }
 
 static void drawStatus(bool ilReady)
 {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
-    char l1[200], l2[200];
+    char l1[200], l2[200], l3[160];
 
     if (!ilReady) {
         std::snprintf(l1, sizeof l1, "RAGE: IL2CPP not ready");
-        l2[0] = 0;
+        l2[0] = 0; l3[0] = 0;
     } else {
         uintptr_t pc   = localPlayerController();
         uintptr_t arms = ok(pc) ? Read<uintptr_t>(pc + off::pcArms) : 0;
         uintptr_t mv   = ok(pc) ? Read<uintptr_t>(pc + off::pcMovement) : 0;
 
         std::snprintf(l1, sizeof l1,
-            "RAGE tog: ammo=%d rate=%d mbt=%d rec=%d spr=%d | pc=%d arms=%d mv=%d wpn=%d cam=%d",
-            rage::infinity_ammo, rage::rapid_fire, rage::MBT, rage::no_recoil, rage::no_spread,
+            "RAGE tog: ammo=%d rate=%d mbt=%d rec=%d spr=%d fly=%d | pc=%d arms=%d mv=%d wpn=%d cam=%d",
+            rage::infinity_ammo, rage::rapid_fire, rage::MBT, rage::no_recoil, rage::no_spread, rage::flight,
             ok(pc), ok(arms), ok(mv), (int)g_weapons.size(), ok(fpsCamera()));
 
         std::snprintf(l2, sizeof l2, "RAGE val: mag=%d res=%d timeFired=%.2f freezing=%d grounded=%d",
@@ -220,12 +243,20 @@ static void drawStatus(bool ilReady)
             ok(arms) ? Read<float>(arms + off::arms_TimeFired) : -1.f,
             ok(mv) ? (int)Read<uint8_t>(mv + off::pm_IsFreezing) : -1,
             ok(mv) ? (int)Read<uint8_t>(mv + off::pm_IsGrounded) : -1);
+
+        std::snprintf(l3, sizeof l3, "RAGE fly: noclip=%d speed=%.2f",
+            ok(mv) ? (int)Read<uint8_t>(mv + off::pm_NoclipEnabled) : -1,
+            ok(mv) ? Read<float>(mv + off::pm_NoclipSpeed) : -1.f);
     }
     dl->AddText(ImVec2(11, 81), IM_COL32(0, 0, 0, 255), l1);
     dl->AddText(ImVec2(10, 80), IM_COL32(0, 255, 255, 255), l1);
     if (l2[0]) {
         dl->AddText(ImVec2(11, 97), IM_COL32(0, 0, 0, 255), l2);
         dl->AddText(ImVec2(10, 96), IM_COL32(0, 255, 255, 255), l2);
+    }
+    if (l3[0]) {
+        dl->AddText(ImVec2(11, 113), IM_COL32(0, 0, 0, 255), l3);
+        dl->AddText(ImVec2(10, 112), IM_COL32(0, 255, 255, 255), l3);
     }
 }
 
@@ -255,4 +286,5 @@ void rage::run()
     if (rage::rapid_fire) applyRapidFire();
     if (rage::MBT)           applyMBT();
     if (rage::no_fall_damage) applyNoFallDamage();
+    applyFlight();   // сама проверяет rage::flight внутри, вызывается всегда — ловит момент выключения
 }

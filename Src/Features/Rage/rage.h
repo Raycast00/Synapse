@@ -15,6 +15,10 @@ namespace rage
 
     // Player
     inline bool MBT = false;
+    
+    inline bool flight = false;
+    inline float flight_speed = 1.0f;
+
     inline bool no_fall_damage = false;
 
     // Game

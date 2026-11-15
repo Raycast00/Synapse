@@ -16,7 +16,6 @@ namespace
 {
     struct V3     { float x, y, z; };
     struct Bounds { V3 center; V3 extents; };
-    struct BulletSurf { float modifier; uint8_t material; uint8_t pass; };   // BulletSurface: Modifier@0x0, Material@0x4, Pass@0x5
 
     constexpr bool kStatus = true;   // строка диагностики на экране; false = выключить
 
@@ -55,7 +54,7 @@ namespace
         constexpr float PillGap      = 4.f;
         constexpr float PillRounding = 4.f;
 
-        // GrenadeManager (ScarletWork.Game.Grenades) — живые данные превью, которые игра
+                // GrenadeManager (ScarletWork.Game.Grenades) — живые данные превью, которые игра
         // сама пересчитывает, пока чека выдернута, но бросок ещё не случился.
         constexpr uintptr_t GM_AimParameters   = 0xD0;   // не null = сейчас держишь гранату на прицеле
         constexpr uintptr_t GM_PreviewPosition = 0x100;  // Vector3
@@ -63,14 +62,6 @@ namespace
 
         constexpr float PreviewArcSeconds = 1.2f;  // не из дампа, сколько секунд дуги рисовать — подбирать на глаз
         constexpr int   PreviewArcSteps   = 48;
-
-        // Penetration visualizer — квадрат в мире на стене под прицелом.
-        constexpr float PenetrationProbeRange   = 60.f;   // макс. дальность первого луча (поиск стены), не из дампа
-        constexpr float PenetrationExitRange    = 2.6f;   // с запасом сверх MaxThickness, для поиска "выхода" из стены
-        constexpr float PenetrationMaxThickness = 2.25f;  // BulletPenetration.MaxThickness — подтверждённая константа из dump.cs
-        constexpr float PenetrationQuadHalfSize = 0.12f;  // не из дампа, подбирать на глаз — "небольшой квадрат"
-        constexpr float PenetrationNudge        = 0.02f;  // отступ от точки входа перед вторым лучом
-        constexpr float PenetrationSurfaceOffset = 0.01f; // приподнять квадрат над стеной, чтобы не было z-fighting
     }
 
     struct Api
@@ -80,16 +71,11 @@ namespace
         void *kPlayerController{}, *kPlayer{}, *kSkeleton{}, *kBomb{}, *kSMR{};
         void *kGrenade{}, *kPhysics{};
         void *kGrenadeManager{};
-        void *kBulletPenetration{};
-        void *mGetTransform{}, *mGetPosition{}, *mGetForward{}, *mW2S{}, *mCamMain{};
+        void *mGetTransform{}, *mGetPosition{}, *mW2S{}, *mCamMain{};
         void *mGetBounds{}, *mGetCompInChildren{}, *mObjGetName{}, *mGetBones{}, *mGetHeadBone{}, *mGetParent{};
         void *mScreenW{}, *mScreenH{};
         void *mPcHealth{}, *mPlayerTeam{}, *mPlayerIsAlive{}, *mSkelWeapon{}, *mBombTimeLeft{};
         void *mGrenPos{}, *mGrenVel{}, *mGrenSpawn{}, *mGrenVisible{}, *mGrenResting{}, *mGravity{};
-        void *mRaycast6{};        // Physics.Raycast(Vector3,Vector3,out RaycastHit,float,int,QueryTriggerInteraction) — argc=6, единственная такая
-        void *mRH_GetCollider{};  // RaycastHit.get_collider() — вызывается на сырой структуре по адресу
-        void *mBP_Surface{};      // BulletPenetration.Surface(Collider, int, out bool)
-        void *mBP_Opaque{};       // BulletPenetration.Opaque(in BulletSurface)
     } A;
 
     bool ResolveApi()
@@ -97,7 +83,6 @@ namespace
         if (A.ready) return true;
         A.missing.clear();
         const char* core = "UnityEngine.CoreModule";
-        const char* physMod = "UnityEngine.PhysicsModule";
         auto need = [&](void* p, const char* n) { if (!p) { A.missing += n; A.missing += ' '; } };
 
         A.kPlayerController = il::Class("", "PlayerController", "Assembly-CSharp");
@@ -105,8 +90,6 @@ namespace
         A.kBomb             = il::Class("ScarletWork.Game", "Bomb", "Assembly-CSharp");
         A.kPlayer           = il::Class("Photon.Realtime", "Player", "PhotonRealtime");
         A.kGrenade          = il::Class("ScarletWork.Game.Grenades", "GrenadeProjectile", "Assembly-CSharp");
-        A.kGrenadeManager   = il::Class("ScarletWork.Game.Grenades", "GrenadeManager", "Assembly-CSharp");
-        A.kBulletPenetration = il::Class("ScarletWork.Hit", "BulletPenetration", "Assembly-CSharp");
 
         void* kComponent = il::Class("UnityEngine", "Component", core);
         void* kTransform = il::Class("UnityEngine", "Transform", core);
@@ -115,15 +98,11 @@ namespace
         void* kScreen    = il::Class("UnityEngine", "Screen", core);
         void* kObject    = il::Class("UnityEngine", "Object", core);
         A.kSMR           = il::Class("UnityEngine", "SkinnedMeshRenderer", core);
-
-        // Physics/RaycastHit/Collider реально лежат в PhysicsModule, не в CoreModule (проверено по TypeDefIndex).
-        A.kPhysics       = il::Class("UnityEngine", "Physics", physMod);
-        void* kRaycastHit = il::Class("UnityEngine", "RaycastHit", physMod);
+        A.kPhysics       = il::Class("UnityEngine", "Physics", core);
 
         A.mGetTransform      = il::Method(kComponent, "get_transform", 0);
         A.mGetCompInChildren = il::Method(kComponent, "GetComponentInChildren", 2);
         A.mGetPosition       = il::Method(kTransform, "get_position", 0);
-        A.mGetForward        = il::Method(kTransform, "get_forward", 0);   // опционально, для penetration-квадрата
         A.mGetParent         = il::Method(kTransform, "get_parent", 0);    // опционально: без него скелет не рисуется
         A.mW2S               = il::Method(kCamera, "WorldToScreenPoint", 1);
         A.mCamMain           = il::Method(kCamera, "get_main", 0);
@@ -146,10 +125,7 @@ namespace
         A.mGrenResting  = il::Method(A.kGrenade, "get_IsResting", 0);       // опционально
         A.mGravity      = il::Method(A.kPhysics, "get_gravity", 0);        // опционально
 
-        A.mRaycast6     = il::Method(A.kPhysics, "Raycast", 6);                       // опционально, для penetration
-        A.mRH_GetCollider = il::Method(kRaycastHit, "get_collider", 0);               // опционально
-        A.mBP_Surface   = il::Method(A.kBulletPenetration, "Surface", 3);             // опционально
-        A.mBP_Opaque    = il::Method(A.kBulletPenetration, "Opaque", 1);              // опционально
+        A.kGrenadeManager = il::Class("ScarletWork.Game.Grenades", "GrenadeManager", "Assembly-CSharp");
 
         need(A.kPlayerController, "PlayerController"); need(A.kSkeleton, "PlayerSkeleton");
         need(kComponent, "Component"); need(kTransform, "Transform"); need(kCamera, "Camera");
@@ -702,112 +678,6 @@ namespace
         ImVec2 land;
         if (W2S(prev, sx, sy, (float)sh, land)) dl->AddCircleFilled(land, 4.5f, col, 12);
     }
-
-    // ---- Penetration visualizer ----
-
-    // Небольшой квадрат в мире, "лежащий" на поверхности вдоль её нормали — проекция 4 углов через W2S,
-    // а не плоская иконка на экране.
-    void DrawWorldQuad(ImDrawList* dl, const V3& center, const V3& normal, float halfSize,
-                       ImU32 fillCol, ImU32 lineCol, float sx, float sy, int sh)
-    {
-        V3 up{ 0.f, 1.f, 0.f };
-        float dotUp = normal.x * up.x + normal.y * up.y + normal.z * up.z;
-        if (std::fabs(dotUp) > 0.95f) up = V3{ 1.f, 0.f, 0.f };   // нормаль почти вертикальна — берём другую опору
-
-        V3 t1{ up.y * normal.z - up.z * normal.y, up.z * normal.x - up.x * normal.z, up.x * normal.y - up.y * normal.x };
-        float t1len = std::sqrt(t1.x * t1.x + t1.y * t1.y + t1.z * t1.z);
-        if (t1len < 1e-5f) return;
-        V3 t1n{ t1.x / t1len, t1.y / t1len, t1.z / t1len };
-
-        V3 t2n{ normal.y * t1n.z - normal.z * t1n.y, normal.z * t1n.x - normal.x * t1n.z, normal.x * t1n.y - normal.y * t1n.x };
-
-        V3 t1v{ t1n.x * halfSize, t1n.y * halfSize, t1n.z * halfSize };
-        V3 t2v{ t2n.x * halfSize, t2n.y * halfSize, t2n.z * halfSize };
-
-        V3 base{ center.x + normal.x * Cfg::PenetrationSurfaceOffset,
-                 center.y + normal.y * Cfg::PenetrationSurfaceOffset,
-                 center.z + normal.z * Cfg::PenetrationSurfaceOffset };
-
-        V3 corners[4] = {
-            { base.x + t1v.x + t2v.x, base.y + t1v.y + t2v.y, base.z + t1v.z + t2v.z },
-            { base.x - t1v.x + t2v.x, base.y - t1v.y + t2v.y, base.z - t1v.z + t2v.z },
-            { base.x - t1v.x - t2v.x, base.y - t1v.y - t2v.y, base.z - t1v.z - t2v.z },
-            { base.x + t1v.x - t2v.x, base.y + t1v.y - t2v.y, base.z + t1v.z - t2v.z },
-        };
-
-        ImVec2 pts[4];
-        for (int i = 0; i < 4; i++) {
-            if (!W2S(corners[i], sx, sy, (float)sh, pts[i])) return;
-        }
-
-        dl->AddConvexPolyFilled(pts, 4, fillCol);
-        dl->AddPolyline(pts, 4, lineCol, ImDrawFlags_Closed, 2.0f);
-    }
-
-    // Один настоящий Physics.Raycast + реальные BulletPenetration.Surface()/Opaque() — то же самое,
-    // что считает сама игра, просто без хука, одно честное чтение результата.
-    bool ProbeWall(const V3& origin, const V3& dir, float range, V3& hitPoint, V3& hitNormal, BulletSurf& surf, bool& opaque)
-    {
-        alignas(8) uint8_t hitBuf[48] = {};
-        V3 o = origin, d = dir;
-        float r = range;
-        int layerMask = ~0;      // все слои — если между тобой и стеной стоит игрок/бот, честно попадёт в него
-        int trigger = 1;         // QueryTriggerInteraction.Ignore — стабильное значение стандартного Unity API
-        void* a[6] = { &o, &d, hitBuf, &r, &layerMask, &trigger };
-        void* ret = il::Invoke(A.mRaycast6, nullptr, a);
-        bool hit = ret && *((uint8_t*)ret + 0x10) != 0;
-        if (!hit) return false;
-
-        hitPoint  = *(V3*)(hitBuf + 0x0);
-        hitNormal = *(V3*)(hitBuf + 0xC);
-        int face  = (int)*(uint32_t*)(hitBuf + 0x18);   // RaycastHit.m_FaceID, предположительно == triangleIndex
-        if (!Finite(hitPoint) || !Finite(hitNormal)) return false;
-
-        void* collider = il::Invoke(A.mRH_GetCollider, hitBuf, nullptr);
-        if (!il::ValidPtr((uintptr_t)collider)) return false;
-
-        bool mapped = false;
-        void* argsSurf[3] = { collider, &face, &mapped };
-        surf = il::InvokeBoxed<BulletSurf>(A.mBP_Surface, nullptr, argsSurf);
-
-        void* argsOp[1] = { &surf };
-        void* opRet = il::Invoke(A.mBP_Opaque, nullptr, argsOp);
-        opaque = opRet && *((uint8_t*)opRet + 0x10) != 0;
-        return true;
-    }
-
-    void DrawPenetrationIndicator(ImDrawList* dl, float sx, float sy, int sh)
-    {
-        if (!A.mRaycast6 || !A.mRH_GetCollider || !A.mBP_Surface || !A.mBP_Opaque || !A.mGetForward) return;
-        if (!il::ValidPtr(F.camera)) return;
-
-        void* camTr = il::Invoke(A.mGetTransform, (void*)F.camera, nullptr);
-        if (!il::ValidPtr((uintptr_t)camTr)) return;
-        V3 eye = il::InvokeBoxed<V3>(A.mGetPosition, camTr, nullptr);
-        V3 fwd = il::InvokeBoxed<V3>(A.mGetForward, camTr, nullptr);
-        if (!Finite(eye) || !Finite(fwd)) return;
-
-        V3 entryPoint, entryNormal; BulletSurf entrySurf; bool entryOpaque = false;
-        if (!ProbeWall(eye, fwd, Cfg::PenetrationProbeRange, entryPoint, entryNormal, entrySurf, entryOpaque)) return;
-
-        bool canPenetrate = false;
-        if (!entryOpaque) {
-            V3 nudged{ entryPoint.x + fwd.x * Cfg::PenetrationNudge,
-                       entryPoint.y + fwd.y * Cfg::PenetrationNudge,
-                       entryPoint.z + fwd.z * Cfg::PenetrationNudge };
-            V3 exitPoint, exitNormal; BulletSurf exitSurf; bool exitOpaque = false;
-            if (ProbeWall(nudged, fwd, Cfg::PenetrationExitRange, exitPoint, exitNormal, exitSurf, exitOpaque)) {
-                float thickness = Dist(entryPoint, exitPoint);
-                canPenetrate = !exitOpaque && thickness <= Cfg::PenetrationMaxThickness;
-            }
-            // Если второй луч ничего не нашёл в пределах PenetrationExitRange — стена толще зоны проверки,
-            // значит толще MaxThickness, значит не пробивается — canPenetrate остаётся false.
-        }
-
-        ImU32 fill = canPenetrate ? IM_COL32(40, 220, 90, 90)  : IM_COL32(220, 50, 50, 90);
-        ImU32 line = canPenetrate ? IM_COL32(60, 255, 120, 255) : IM_COL32(255, 70, 70, 255);
-        DrawWorldQuad(dl, entryPoint, entryNormal, Cfg::PenetrationQuadHalfSize, fill, line, sx, sy, sh);
-    }
 }
 
 void visuals::run()
@@ -951,8 +821,6 @@ void visuals::run()
         DrawGrenadePreview(dl, sx, sy, sh);       // пока граната в руке
         DrawGrenadeTrajectories(dl, sx, sy, sh);  // после броска — живой след + короткий прогноз
     }
-
-    if (visualize_penetration) DrawPenetrationIndicator(dl, sx, sy, sh);
 
     StatusLine(dl, true, camOk);
 }
