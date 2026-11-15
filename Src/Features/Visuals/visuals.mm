@@ -744,8 +744,9 @@ void visuals::run()
         if (boxFill) dl->AddRectFilled(a, b, Col(box_fill_color));
         if (box2D) {
             if (current_box_type == 0) {
-                dl->AddRect(ImVec2(a.x - 1, a.y - 1), ImVec2(b.x + 1, b.y + 1), IM_COL32(0, 0, 0, 200));
-                dl->AddRect(a, b, Col(box_color));
+                dl->AddRect(ImVec2(a.x - 1, a.y - 1), ImVec2(b.x + 1, b.y + 1), IM_COL32(0, 0, 0, 200), 0.f, 0, 0.5f);
+                dl->AddRect(ImVec2(a.x + 1, a.y + 1), ImVec2(b.x - 1, b.y - 1), IM_COL32(0, 0, 0, 200), 0.f, 0, 0.5f);
+                dl->AddRect(a, b, Col(box_color), 0.f, 0, 0.75f);
             } else CornerBox(dl, a, b, Col(box_color));
         }
 
