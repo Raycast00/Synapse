@@ -455,8 +455,8 @@ namespace
     void DrawPillRow(ImDrawList* dl, float centerX, float y, const std::vector<PillItem>& items)
     {
         if (items.empty()) return;
-        const ImU32 bg     = IM_COL32(26, 16, 14, 215);
-        const ImU32 border = IM_COL32(95, 62, 54, 255);
+        const ImU32 bg     = IM_COL32(13, 12, 15, 255);
+        const ImU32 border = IM_COL32(28, 26, 28, 255);
 
         std::vector<ImVec2> sizes(items.size());
         float totalW = 0.f, rowH = 0.f;
