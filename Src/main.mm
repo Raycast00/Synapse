@@ -275,20 +275,6 @@ static bool   g_tLeave = false;
 
             if (ImGui::BeginTabItem("Misc"))
             {
-                ImGui::Checkbox("Silent Test", &misc::silent_test);
-                if (misc::silent_test)
-                {
-                    ImGui::SliderFloat("Test Pitch", &misc::test_pitch, -3.15f, 3.15f, "%.2f");
-                    ImGui::SliderFloat("Test Yaw",   &misc::test_yaw,   -3.15f, 3.15f, "%.2f");
-
-                    static bool use_degrees = false;
-                    ImGui::Checkbox("Degrees", &use_degrees);
-                    if (use_degrees) {
-                        ImGui::SliderFloat("Pitch (deg)", &misc::test_pitch, -180.f, 180.f, "%.0f");
-                        ImGui::SliderFloat("Yaw (deg)",   &misc::test_yaw,   -180.f, 180.f, "%.0f");
-                    }
-                }
-
                 ImGui::EndTabItem();
             }
 
