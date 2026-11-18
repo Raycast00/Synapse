@@ -13,7 +13,8 @@ jobs:
 
       - name: Compile dylib
         run: |
-          xcrun -sdk iphoneos clang++ -arch arm64 -miphoneos-version-min=14.0 -std=c++17 -fobjc-arc -O2 \
+          xcrun -sdk iphoneos clang++ -arch arm64 -miphoneos-version-min=14.0 -std=c++20 -fobjc-arc -O2 \
+            -DKAMSHAKO_PORTABLE_MENU -DIMGUI_DEFINE_MATH_OPERATORS \
             -dynamiclib \
             -I Src -I Src/ImGui -I Src/ImGui/Backends -I Src/Memory -I Src/Menu \
             Src/main.mm \
@@ -23,6 +24,19 @@ jobs:
             Src/Features/Rage/rage.mm \
             Src/Features/Misc/misc.mm \
             Src/il2cpp/il2cpp.mm \
+            Src/Menu/assets.cpp \
+            Src/Menu/blur.cpp \
+            Src/Menu/binds.cpp \
+            Src/Menu/content.cpp \
+            Src/Menu/draw.cpp \
+            Src/Menu/font_data.cpp \
+            Src/Menu/fonts.cpp \
+            Src/Menu/launcher.cpp \
+            Src/Menu/menu.cpp \
+            Src/Menu/panel.cpp \
+            Src/Menu/popup.cpp \
+            Src/Menu/search.cpp \
+            Src/Menu/widgets.cpp \
             Src/Memory/KittyAsm.cpp \
             Src/Memory/KittyIOFile.cpp \
             Src/Memory/KittyMemory.cpp \
