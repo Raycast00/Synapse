@@ -4,6 +4,8 @@
 #include "imgui.h"
 #include "imgui_impl_metal.h"
 
+#include "Menu/menu.hpp"
+
 #include "Features/Visuals/visuals.h"
 #include "Features/Aim/aim.h"
 #include "Features/Rage/rage.h"
@@ -13,8 +15,7 @@
 #include "Memory/KittyInclude.hpp"
 
 static bool   g_open = false;
-static CGRect g_btnRect, g_menuRect;
-static bool   g_checkbox = false;
+static CGRect g_btnRect = CGRectZero, g_menuRect = CGRectZero;
 
 // touch state: клик уходит в imgui через кадр после hover
 static ImVec2 g_tPos = ImVec2(-FLT_MAX, -FLT_MAX);
@@ -54,26 +55,10 @@ static bool   g_tLeave = false;
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
 
-    // Styling
     ImGui::GetIO().IniFilename = nullptr;
 
-    ImGui::GetIO().FontGlobalScale = 1.f;
-    ImGui::GetStyle().ScaleAllSizes(1.35f);
-
-    // Rounding shit
-    ImGui::GetStyle().FrameRounding = 3.0f;
-    ImGui::StyleColorsLight();
-    ImGui::GetStyle().WindowRounding = 5.5f;
-    ImGui::GetStyle().ScrollbarSize = 14.f;
-
-    ImGui::GetStyle().Colors[ImGuiCol_CheckMark] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
-    ImGui::GetStyle().Colors[ImGuiCol_TabSelectedOverline] = ImVec4(0, 0, 0, 0);
-    ImGui::GetStyle().Colors[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0, 0, 0, 0);
-
-    ImGui::GetStyle().TabBarBorderSize = 0.0f;
-
-    ImVec4 bgColor = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
-    ImGui::GetStyle().Colors[ImGuiCol_WindowBg] = ImVec4(0.97f, 0.97f, 0.97f, 0.95f); 
+    // neverlose-style theme: embedded fonts + palette + style
+    menu::initialize();
 
     ImGui_ImplMetal_Init(dev);
     return self;
@@ -117,189 +102,137 @@ static bool   g_tLeave = false;
     ImGui_ImplMetal_NewFrame(rpd);
     ImGui::NewFrame();
 
-    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
-
     visuals::run();
     aim::run();
     rage::run();
     misc::run();
 
-    // Кнопка вызова меню (всегда видна)
-    ImGui::SetNextWindowPos(ImVec2(20, 60), ImGuiCond_FirstUseEver);
-    ImGui::Begin("##btn", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                 ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar);
-    if (ImGui::Button(g_open ? "Close" : "Menu")) {
-        g_open = !g_open;
-    }
-    g_btnRect = CGRectMake(ImGui::GetWindowPos().x, ImGui::GetWindowPos().y,
-                           ImGui::GetWindowSize().x, ImGui::GetWindowSize().y);
-    ImGui::End();
+    UIEdgeInsets safe = view.safeAreaInsets;
+    menu::setSafeInsets((float)safe.top, (float)safe.bottom);
 
-    // Само меню
-    if (g_open) {
-        ImGui::SetNextWindowPos(ImVec2(120, 60), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(470, 300), ImGuiCond_FirstUseEver);
-
-        ImGui::Begin("Synapse iPA", &g_open);
-
-        ImVec2 wp = ImGui::GetWindowPos(), ws = ImGui::GetWindowSize();
-        g_menuRect = CGRectInset(CGRectMake(wp.x, wp.y, ws.x, ws.y), -8, -8);
-
-        if (ImGui::BeginTabBar("Tabs"))
+    // Launcher + shell. begin() always draws the launcher when closed.
+    if (menu::begin(g_open))
+    {
+        if (menu::page(menu::Page::Visuals))
         {
-            if (ImGui::BeginTabItem("Visuals"))
-            {
-                // ENEMY
-                ImGui::Checkbox("Enabled", &visuals::esp_enabled);
+            menu::card("PLAYER");
+            menu::toggle("Enabled", &visuals::esp_enabled);
+            menu::toggleColor("Box", &visuals::box2D, visuals::box_color);
+            menu::toggleColor("Filled Box", &visuals::boxFill, visuals::box_fill_color);
+            menu::combo("Box Type", &visuals::current_box_type,
+                        visuals::box_type, IM_ARRAYSIZE(visuals::box_type), visuals::box2D);
+            menu::toggleColor("Skeleton", &visuals::skeleton, visuals::skeleton_color);
+            menu::toggleColor("Health Bar", &visuals::healthBar, visuals::healthbar_color);
+            menu::toggle("Health Text", &visuals::healthBarText, visuals::healthBar);
+            menu::toggleColor("Names", &visuals::names, visuals::names_color);
+            menu::toggleColor("Weapon Text", &visuals::weaponText, visuals::weapon_text_color);
+            menu::toggle("Weapon Icon", &visuals::weaponIcon);
+            menu::toggleColor("Distance", &visuals::distance, visuals::distance_color);
+            menu::toggleColor("Tracer", &visuals::tracer, visuals::tracer_color);
+            menu::endCard();
 
-                ImGui::SeparatorText("Enemy");
+            menu::card("BOMB");
+            menu::toggleColor("Timer Bar", &visuals::bomb_timer_bar, visuals::bomb_timer_color);
+            menu::endCard();
 
-                ImGui::Checkbox("Box", &visuals::box2D);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## Box Color", visuals::box_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-                if (visuals::box2D)
-                {
-                    ImGui::SameLine();
-                    ImGui::Checkbox("Filled", &visuals::boxFill);
-                    ImGui::SameLine();
-                    ImGui::ColorEdit4("## Box Fill Color", visuals::box_fill_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-
-                    ImGui::Combo("Box Type", &visuals::current_box_type, visuals::box_type, IM_ARRAYSIZE(visuals::box_type));
-                }
-
-                ImGui::Checkbox("Skeleton", &visuals::skeleton);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## Skeleton Color", visuals::skeleton_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-
-                ImGui::Checkbox("Health Bar", &visuals::healthBar);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## Health Bar Color", visuals::healthbar_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-                if (visuals::healthBar)
-                {
-                    ImGui::SameLine();
-                    ImGui::Checkbox("Show Text", &visuals::healthBarText);
-                }
-
-                ImGui::Checkbox("Names", &visuals::names);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## Names Color", visuals::names_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-
-                ImGui::Checkbox("Weapon Text", &visuals::weaponText);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## Weapon Text Color", visuals::weapon_text_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-                
-                ImGui::Checkbox("Weapon Icon", &visuals::weaponIcon);
-
-                ImGui::Checkbox("Distance", &visuals::distance);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## Distance Color", visuals::distance_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-
-                ImGui::Checkbox("Tracer", &visuals::tracer);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## Tracer Color", visuals::tracer_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-                ImGui::EndTabItem();
-
-                // BOMB
-                ImGui::SeparatorText("Bomb");
-
-                ImGui::Checkbox("Timer", &visuals::bomb_timer_bar);
-
-                // GRENADE
-                ImGui::SeparatorText("Grenade");
-
-                ImGui::Checkbox("Visualize Trajectory", &visuals::visualize_grenade_trajectory);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## Trajectory Color", visuals::grenade_trajectory_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-            }
-
-            if (ImGui::BeginTabItem("Aim"))
-            {
-                ImGui::Checkbox("AimBot", &aim::aimbot);
-                if (aim::aimbot)
-                {
-                    ImGui::SameLine();
-                    ImGui::Checkbox("Silent", &aim::silent);
-                }
-                ImGui::Checkbox("Automatic Fire", &aim::automatic_fire);
-
-                ImGui::Checkbox("Draw FOV", &aim::draw_fov);
-                ImGui::SameLine();
-                ImGui::ColorEdit4("## FOV Color", aim::fov_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-                ImGui::SliderFloat("Field of View", &aim::fov_radius, 15.f, 180.f, "%.0f");
-
-                ImGui::SliderFloat("Smoothing", &aim::aimbot_smoothing, 0.f, 100.f, "%.0f%%");
-                ImGui::Combo("Hitboxes", &aim::current_aimbot_hitbox, aim::aimbot_hitboxes, IM_ARRAYSIZE(aim::aimbot_hitboxes));
-                
-                ImGui::Checkbox("RCS", &aim::RCS);
-
-                // OTHER
-                ImGui::SeparatorText("Other");
-                ImGui::Checkbox("Visualize", &aim::aim_visualize_bullet);
-
-                // ANTI AIM
-                ImGui::SeparatorText("Anti Aim");
-
-                ImGui::Checkbox("Enabled", &aim::anti_aim);
-                ImGui::SliderFloat("Pitch", &aim::anti_pitch, -90.f, 180.f, "%.1f");
-                ImGui::SliderFloat("Yaw", &aim::anti_yaw, -90.f, 90.f, "%.1f");
-
-                ImGui::EndTabItem();
-            }
-
-            if (ImGui::BeginTabItem("Rage"))
-            {
-                ImGui::SeparatorText("Player");
-
-                ImGui::Checkbox("Move Before Timer", &rage::MBT);
-
-                ImGui::Checkbox("No Clip", &rage::flight);
-                if (rage::flight)
-                {
-                    ImGui::SliderFloat("Speed", &rage::flight_speed, 1.f, 20.f, "%.1f");
-                }
-
-                ImGui::Checkbox("Wallbang", &rage::wallbang);
-                ImGui::Checkbox("No Fall Damage", &rage::no_fall_damage);
-
-                ImGui::SeparatorText("Weapon");
-
-                ImGui::Checkbox("Infinity Ammo", &rage::infinity_ammo);
-                ImGui::Checkbox("Rapid Fire", &rage::rapid_fire);
-                ImGui::Checkbox("No Recoil", &rage::no_recoil);
-                ImGui::Checkbox("No Spread", &rage::no_spread);
-
-                ImGui::SeparatorText("Bomb");
-
-                ImGui::Checkbox("Fast Defuse", &rage::fast_defuse);
-                ImGui::Checkbox("Auto Win", &rage::auto_win);
-
-                ImGui::EndTabItem();
-            }
-
-            if (ImGui::BeginTabItem("Misc"))
-            {
-                ImGui::EndTabItem();
-            }
-
-            if (ImGui::BeginTabItem("Settings"))
-            {
-                ImGui::Text("Settings");
-                ImGui::Checkbox("Watermark", &settings::watermark);
-                ImGui::Checkbox("Overlay", &settings::overlay);
-                ImGui::Combo("Theme", &settings::current_theme, settings::theme_type, IM_ARRAYSIZE(settings::theme_type));
-                ImGui::Text("iPA by wurvt");
-                ImGui::Text("v0.0.4b");
-
-                ImGui::EndTabItem();
-            }
-
-            ImGui::EndTabBar();
+            menu::card("GRENADE");
+            menu::toggleColor("Trajectory", &visuals::visualize_grenade_trajectory,
+                              visuals::grenade_trajectory_color);
+            menu::endCard();
         }
 
-        ImGui::End();
-        if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
-            g_menuRect = view.bounds;
-    } else {
+        if (menu::page(menu::Page::Aim))
+        {
+            menu::card("AIMBOT");
+            menu::toggle("Enabled", &aim::aimbot);
+            menu::toggle("Silent", &aim::silent, aim::aimbot);
+            menu::toggle("Automatic Fire", &aim::automatic_fire);
+            menu::combo("Hitbox", &aim::current_aimbot_hitbox,
+                        aim::aimbot_hitboxes, IM_ARRAYSIZE(aim::aimbot_hitboxes));
+            menu::slider("Field of View", &aim::fov_radius, 15.0f, 180.0f, "%.0f\xc2\xb0");
+            menu::slider("Smoothing", &aim::aimbot_smoothing, 0.0f, 100.0f, "%.0f%%");
+            menu::toggleColor("Draw FOV", &aim::draw_fov, aim::fov_color);
+            menu::endCard();
+
+            menu::card("WEAPON");
+            menu::toggle("Recoil Control", &aim::RCS);
+            menu::toggle("Visualize Bullet", &aim::aim_visualize_bullet);
+            menu::endCard();
+
+            menu::card("ANTI AIM");
+            menu::toggle("Enabled", &aim::anti_aim);
+            menu::slider("Pitch", &aim::anti_pitch, -90.0f, 180.0f, "%.1f", aim::anti_aim);
+            menu::slider("Yaw", &aim::anti_yaw, -90.0f, 90.0f, "%.1f", aim::anti_aim);
+            menu::endCard();
+        }
+
+        if (menu::page(menu::Page::Rage))
+        {
+            menu::card("PLAYER");
+            menu::toggle("Move Before Timer", &rage::MBT);
+            menu::toggle("No Clip", &rage::flight);
+            menu::slider("Speed", &rage::flight_speed, 1.0f, 20.0f, "%.1f", rage::flight);
+            menu::toggle("No Fall Damage", &rage::no_fall_damage);
+            menu::toggle("Wallbang", &rage::wallbang);
+            menu::endCard();
+
+            menu::card("WEAPON");
+            menu::toggle("Infinity Ammo", &rage::infinity_ammo);
+            menu::toggle("Rapid Fire", &rage::rapid_fire);
+            menu::toggle("Perfect Accuracy", &rage::perfect_accuracy);
+            menu::toggle("No Recoil", &rage::no_recoil);
+            menu::toggle("No Spread", &rage::no_spread);
+            menu::endCard();
+
+            menu::card("BOMB");
+            menu::toggle("Fast Defuse", &rage::fast_defuse);
+            menu::toggle("Auto Win", &rage::auto_win);
+            menu::endCard();
+        }
+
+        if (menu::page(menu::Page::Misc))
+        {
+            menu::card("MISCELLANEOUS");
+            menu::text("Nothing here yet.");
+            menu::caption("More features will be added later.");
+            menu::endCard();
+        }
+
+        if (menu::page(menu::Page::Settings))
+        {
+            menu::card("INTERFACE");
+            menu::toggle("Watermark", &settings::watermark);
+            menu::toggle("Overlay", &settings::overlay);
+            menu::endCard();
+
+            menu::card("ABOUT");
+            menu::text("Synapse for iOS");
+            menu::caption("neverlose theme  \xc2\xb7  v0.0.4b");
+            menu::caption("iPA by wurvt");
+            menu::endCard();
+        }
+
+        menu::end();
+    }
+
+    // Keep the touch catcher in sync with what is actually drawn.
+    const ImVec4 btn = menu::buttonRect();
+    g_btnRect = CGRectMake(btn.x, btn.y, btn.z, btn.w);
+
+    if (g_open)
+    {
+        if (menu::popupOpen())
+        {
+            g_menuRect = view.bounds; // popups may stick out of the shell
+        }
+        else
+        {
+            const ImVec4 shell = menu::shellRect();
+            g_menuRect = CGRectMake(shell.x, shell.y, shell.z, shell.w);
+        }
+    }
+    else
+    {
         g_menuRect = CGRectZero;
     }
 

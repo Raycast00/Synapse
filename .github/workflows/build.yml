@@ -15,8 +15,9 @@ jobs:
         run: |
           xcrun -sdk iphoneos clang++ -arch arm64 -miphoneos-version-min=14.0 -std=c++17 -fobjc-arc -O2 \
             -dynamiclib \
-            -I Src -I Src/ImGui -I Src/ImGui/Backends -I Src/Memory \
+            -I Src -I Src/ImGui -I Src/ImGui/Backends -I Src/Memory -I Src/Menu \
             Src/main.mm \
+            Src/Menu/menu.cpp \
             Src/Features/Visuals/visuals.mm \
             Src/Features/Aim/aim.mm \
             Src/Features/Rage/rage.mm \
