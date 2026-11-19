@@ -1,10 +1,15 @@
-// Neverlose-style menu adapted to iOS.
+// Strict iOS port of the nlka menu.
 //
-// The original Windows menu used a fixed 750x756 canvas, Direct3D blur and
-// textures. This port keeps the exact visual language (dark glass shell,
-// sidebar, cards, animated toggles, select popups, color pickers) but uses a
-// responsive point-based layout, touch-friendly hit areas and no GPU blur.
-// All rows are bound to the real Synapse feature variables.
+// Source: C:\Users\krzhs\OneDrive\Documents\nlka\examples\example_win32_directx11\
+//           neverlose_menu.cpp / neverlose_menu.hpp / neverlose_menu_internal.hpp
+//
+// The layout, colors, animations, cards, rows and page content are kept exactly
+// as in the original 750x756 canvas. The canvas is uniformly scaled to the iOS
+// screen. The only substitutions:
+//   * Direct3D blur  -> full-screen dim layer (no scene texture available);
+//   * avatar texture -> small vector avatar drawn in the same rectangle;
+//   * the decorative magnifier in the toolbar is a close button (iOS has no Esc);
+//   * controls whose feature does not exist in Synapse keep local dummy state.
 
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "menu.h"
@@ -17,7 +22,6 @@
 #include "Features/Aim/aim.h"
 #include "Features/Rage/rage.h"
 #include "Features/Visuals/visuals.h"
-#include "Settings/settings.h"
 
 #include <cfloat>
 #include <cmath>
@@ -27,882 +31,739 @@
 namespace
 {
     // ---------------------------------------------------------------------
-    // Theme
+    // Canvas / theme (values copied from nlka)
     // ---------------------------------------------------------------------
+    constexpr ImVec2 kCanvas(750.0f, 756.0f);
+    constexpr ImVec2 kShell(748.0f, 576.0f);
+    constexpr float kTextBody = 15.0f;
+    constexpr float kTextControl = 14.0f;
+    constexpr float kTextSmall = 12.0f;
+    constexpr float kTextCaption = 10.0f;
+    constexpr float kTextTitle = 16.0f;
+    constexpr float kTextIcon = 13.0f;
     constexpr ImU32 C(int r, int g, int b, int a = 255) { return IM_COL32(r, g, b, a); }
 
-    constexpr float kBody = 14.0f;
-    constexpr float kControl = 13.0f;
-    constexpr float kSmall = 11.0f;
-    constexpr float kCaption = 9.5f;
-    constexpr float kTitle = 15.0f;
-    constexpr float kIcon = 12.5f;
+    enum class NeverlosePage
+    {
+        Rage,
+        Legit,
+        Players,
+        World,
+        Inventory,
+        Miscellaneous
+    };
 
-    constexpr float kSidebarW = 150.0f;
-    constexpr float kToolbarH = 48.0f;
-    constexpr float kGap = 10.0f;
-    constexpr float kTitleH = 16.0f;
-
-    constexpr ImGuiColorEditFlags kColorFlags =
-        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel |
-        ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop |
-        ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_PickerHueBar;
-
-    enum class Ctl { Toggle, Select, Slider, Color, Text };
+    enum class NeverloseControl
+    {
+        Toggle,
+        Select,
+        MultiSelect,
+        Slider,
+        Chevron,
+        Color,
+        Disabled
+    };
 
     struct Row
     {
-        const char* label = "";
-        Ctl type = Ctl::Toggle;
-        bool* toggle = nullptr;
-        float* slider = nullptr;
-        float lo = 0.0f;
-        float hi = 1.0f;
-        const char* fmt = "%.0f";
-        int* select = nullptr;
-        const char* const* items = nullptr;
-        int count = 0;
-        float* color = nullptr;
-        const char* text = nullptr;
+        const char* label;
+        NeverloseControl type;
+        const char* value;
+        float amount;
+
+        // Optional bindings to the real Synapse variables. Rows without a
+        // binding keep the original local demo state, so they still animate.
+        bool* bind_toggle = nullptr;
+        float* bind_slider = nullptr;
+        float bind_lo = 0.0f;
+        float bind_hi = 1.0f;
     };
 
-    struct Card
+    struct Popup
     {
-        const char* title = "";
-        const Row* rows = nullptr;
-        int count = 0;
+        bool open = false;
+        bool multi = false;
+        int owner = -1;
+        int selected = 0;
+        unsigned mask = 0x07;
+        ImVec2 anchor{};
+        float width = 134.0f;
+        int opened_frame = 0;
     };
 
-    enum { PageRage = 0, PageAim = 1, PageVisuals = 2, PageSettings = 3 };
-
-    struct MenuState
+    struct State
     {
-        int page = PageRage;
-        int visuals_tab = 0;
+        NeverlosePage page = NeverlosePage::Rage;
+        NeverlosePage previous = NeverlosePage::Rage;
         float page_mix = 1.0f;
-        float scroll = 0.0f;
-
-        bool popup_open = false;
-        int* popup_target = nullptr;
-        const char* const* popup_items = nullptr;
-        int popup_count = 0;
-        ImVec2 popup_anchor{};
-        float popup_width = 120.0f;
-        int popup_opened_frame = 0;
-
+        bool account = false;
+        bool toggles[192]{};
+        bool slider_initialized[192]{};
+        int selects[192]{};
+        float sliders[192]{};
+        Popup popup;
         float open_mix = 0.0f;
-        bool scroll_drag = false;
+        ImVec2 popup_rect_min{};
+        ImVec2 popup_rect_max{};
+
+        State()
+        {
+            const int enabled[] = {
+                0, 1, 2, 3, 18, 19,
+                48, 57,
+                79, 80, 88, 89, 95,
+                120, 121, 122, 123, 124, 127, 128, 131, 132, 134, 135
+            };
+            for (int id : enabled) toggles[id] = true;
+        }
     } state;
 
     // ---------------------------------------------------------------------
-    // Small helpers
+    // Canvas -> screen transform
     // ---------------------------------------------------------------------
-    ImFont* StrongFont()
+    struct View
     {
-        ImFont* font = menu_fonts::strong();
-        return font != nullptr ? font : ImGui::GetFont();
-    }
+        ImVec2 origin{};
+        float scale = 1.0f;
+    } view;
 
+    ImVec2 P(float x, float y) { return ImVec2(view.origin.x + x * view.scale, view.origin.y + y * view.scale); }
+    ImVec2 P(const ImVec2& v) { return P(v.x, v.y); }
+    ImVec2 SZ(const ImVec2& v) { return ImVec2(v.x * view.scale, v.y * view.scale); }
+    ImVec2 SZ(float x, float y) { return SZ(ImVec2(x, y)); }
+    float S(float v) { return v * view.scale; }
+
+    // ---------------------------------------------------------------------
+    // Helpers (same math as nlka, with the canvas transform)
+    // ---------------------------------------------------------------------
     float Motion(ImGuiID id, float target, float speed = 16.0f, float initial = -1.0f)
     {
         float* value = ImGui::GetStateStorage()->GetFloatRef(id, initial < 0.0f ? target : initial);
         *value = ImLerp(*value, target, 1.0f - std::exp(-speed * ImGui::GetIO().DeltaTime));
-        if (std::fabs(*value - target) < 0.0005f)
-            *value = target;
+        if (std::fabs(*value - target) < 0.0005f) *value = target;
         return *value;
     }
 
     ImU32 Mix(ImU32 a, ImU32 b, float t)
     {
-        return ImGui::ColorConvertFloat4ToU32(ImLerp(ImGui::ColorConvertU32ToFloat4(a),
-                                                     ImGui::ColorConvertU32ToFloat4(b), ImSaturate(t)));
+        return ImGui::ColorConvertFloat4ToU32(ImLerp(ImGui::ColorConvertU32ToFloat4(a), ImGui::ColorConvertU32ToFloat4(b), ImSaturate(t)));
     }
 
-    void Text(ImDrawList* d, ImVec2 p, ImU32 col, const char* value, float size = kBody, ImFont* font = nullptr)
+    void Text(ImDrawList* d, ImVec2 p, ImU32 color, const char* value, float size = kTextBody, ImFont* font = nullptr)
     {
-        d->AddText(font != nullptr ? font : ImGui::GetFont(), size, p, col, value);
+        d->AddText(font ? font : ImGui::GetFont(), S(size), P(p), color, value);
     }
 
-    void TextY(ImDrawList* d, float x, float y, float h, ImU32 col, const char* value,
-               float size = kBody, ImFont* font = nullptr)
+    void TextY(ImDrawList* d, float x, float y, float h, ImU32 color, const char* value, float size = kTextBody, ImFont* font = nullptr)
     {
-        ImFont* f = font != nullptr ? font : ImGui::GetFont();
-        const float th = f->CalcTextSizeA(size, FLT_MAX, 0.0f, value).y;
-        Text(d, ImVec2(x, y + std::floor((h - th) * 0.5f)), col, value, size, f);
-    }
-
-    void TextClamp(ImDrawList* d, ImVec2 p, float size, float max_w, ImU32 col, const char* value)
-    {
-        ImFont* f = ImGui::GetFont();
-        if (max_w <= 4.0f)
-            return;
-        if (f->CalcTextSizeA(size, FLT_MAX, 0.0f, value).x <= max_w)
-        {
-            Text(d, p, col, value, size, f);
-            return;
-        }
-
-        char buffer[160];
-        size_t length = ImStrlen(value);
-        if (length >= sizeof(buffer))
-            length = sizeof(buffer) - 1;
-        memcpy(buffer, value, length);
-        buffer[length] = 0;
-        const float dots = f->CalcTextSizeA(size, FLT_MAX, 0.0f, "...").x;
-        while (length > 3 && f->CalcTextSizeA(size, FLT_MAX, 0.0f, buffer).x + dots > max_w)
-            buffer[--length] = 0;
-        if (length + 3 < sizeof(buffer))
-        {
-            buffer[length++] = '.';
-            buffer[length++] = '.';
-            buffer[length++] = '.';
-            buffer[length] = 0;
-        }
-        Text(d, p, col, buffer, size, f);
+        ImFont* f = font ? font : ImGui::GetFont();
+        const float th = f->CalcTextSizeA(S(size), FLT_MAX, 0.0f, value).y / view.scale;
+        Text(d, ImVec2(x, y + std::floor((h - th) * 0.5f)), color, value, size, f);
     }
 
     bool Hit(const char* id, ImVec2 p, ImVec2 size)
     {
-        ImGui::SetCursorScreenPos(p);
-        return ImGui::InvisibleButton(id, size);
+        ImGui::SetCursorScreenPos(P(p));
+        return ImGui::InvisibleButton(id, SZ(size));
+    }
+
+    void Dots(ImDrawList* d, ImVec2 p)
+    {
+        for (int i = 0; i < 3; ++i) d->AddCircleFilled(P(p + ImVec2(i * 3.0f, 0)), S(1.0f), C(187, 191, 202));
     }
 
     void Chevron(ImDrawList* d, ImVec2 p, ImU32 color)
     {
-        d->AddLine(p, p + ImVec2(3, 3), color, 1.3f);
-        d->AddLine(p + ImVec2(3, 3), p + ImVec2(0, 6), color, 1.3f);
+        d->AddLine(P(p), P(p + ImVec2(3, 3)), color, S(1.3f));
+        d->AddLine(P(p + ImVec2(3, 3)), P(p + ImVec2(0, 6)), color, S(1.3f));
     }
 
     void Check(ImDrawList* d, ImVec2 p, ImU32 color)
     {
-        d->AddLine(p, p + ImVec2(3, 3), color, 1.5f);
-        d->AddLine(p + ImVec2(3, 3), p + ImVec2(8, -3), color, 1.5f);
+        d->AddLine(P(p), P(p + ImVec2(3, 3)), color, S(1.5f));
+        d->AddLine(P(p + ImVec2(3, 3)), P(p + ImVec2(8, -3)), color, S(1.5f));
     }
 
     void CloseCross(ImDrawList* d, ImVec2 c, ImU32 color)
     {
-        d->AddLine(c + ImVec2(-4, -4), c + ImVec2(4, 4), color, 1.5f);
-        d->AddLine(c + ImVec2(4, -4), c + ImVec2(-4, 4), color, 1.5f);
+        d->AddLine(P(c + ImVec2(-4, -4)), P(c + ImVec2(4, 4)), color, S(1.5f));
+        d->AddLine(P(c + ImVec2(4, -4)), P(c + ImVec2(-4, 4)), color, S(1.5f));
     }
 
-    void FadeVertices(ImDrawList* d, int first, float alpha_mul)
+    // No avatar texture on iOS: draw the same rounded square with a silhouette.
+    void Avatar(ImDrawList* d, ImVec2 p, float size, float rounding)
     {
-        for (int i = first; i < d->VtxBuffer.Size; ++i)
-        {
-            ImDrawVert& v = d->VtxBuffer[i];
-            const ImU32 a = (v.col >> IM_COL32_A_SHIFT) & 255u;
-            v.col = (v.col & 0x00ffffffu) | ((ImU32)(a * alpha_mul) << IM_COL32_A_SHIFT);
-        }
+        d->AddRectFilled(P(p), P(p + ImVec2(size, size)), C(9, 30, 54), S(rounding));
+        d->AddRect(P(p), P(p + ImVec2(size, size)), C(38, 84, 132), S(rounding));
+        const ImVec2 c = p + ImVec2(size * 0.5f, size * 0.5f);
+        d->AddCircleFilled(P(ImVec2(c.x, p.y + size * 0.37f)), S(size * 0.14f), C(94, 185, 255));
+        d->AddRectFilled(P(ImVec2(p.x + size * 0.26f, p.y + size * 0.60f)),
+                         P(ImVec2(p.x + size * 0.74f, p.y + size * 0.94f)),
+                         C(94, 185, 255), S(size * 0.18f));
     }
 
-    // ---------------------------------------------------------------------
-    // Row data (bound to the actual cheat settings)
-    // ---------------------------------------------------------------------
-    Row ToggleRow(const char* label, bool* value)
+    void Card(ImDrawList* d, ImVec2 p, ImVec2 size, const char* title)
     {
-        Row r;
-        r.label = label;
-        r.type = Ctl::Toggle;
-        r.toggle = value;
-        return r;
+        Text(d, p + ImVec2(12, -18), C(89, 94, 106), title, kTextCaption);
+        d->AddRectFilled(P(p), P(p + size), C(17, 19, 27, 224), S(14.0f));
+        d->AddRect(P(p), P(p + size), C(31, 34, 44), S(14.0f));
     }
 
-    Row SelectRow(const char* label, int* value, const char* const* items, int count)
+    void Toggle(ImDrawList* d, int id, ImVec2 p, bool enabled = true, bool* bind = nullptr)
     {
-        Row r;
-        r.label = label;
-        r.type = Ctl::Select;
-        r.select = value;
-        r.items = items;
-        r.count = count;
-        return r;
+        bool& value = bind != nullptr ? *bind : state.toggles[id];
+        ImGui::PushID(id);
+        if (enabled && Hit("##toggle", p - ImVec2(5, 6), ImVec2(39, 30))) value = !value;
+        const ImGuiID iid = ImGui::GetItemID();
+        const float on = Motion(iid ^ 0x55aa721u, value ? 1.0f : 0.0f, 19.0f);
+        const float hover = Motion(iid ^ 0x118a0u, enabled && ImGui::IsItemHovered() ? 1.0f : 0.0f, 20.0f);
+        ImGui::PopID();
+        d->AddRectFilled(P(p - ImVec2(1 + hover, 1 + hover)), P(p + ImVec2(30 + hover, 19 + hover)), C(75, 126, 255, (int)(45 * hover)), S(10));
+        d->AddRectFilled(P(p), P(p + ImVec2(29, 18)), Mix(C(29, 33, 43), C(75, 126, 255), on), S(9));
+        d->AddCircleFilled(P(p + ImVec2(ImLerp(9.0f, 20.0f, on), 9)), S(7), Mix(C(133, 144, 156), C(248, 249, 252), on));
     }
 
-    Row SliderRow(const char* label, float* value, float lo, float hi, const char* fmt)
+    void OpenPopup(int owner, bool multi, ImVec2 anchor, float width)
     {
-        Row r;
-        r.label = label;
-        r.type = Ctl::Slider;
-        r.slider = value;
-        r.lo = lo;
-        r.hi = hi;
-        r.fmt = fmt;
-        return r;
+        const bool same = state.popup.open && state.popup.owner == owner;
+        state.popup.open = !same;
+        state.popup.owner = owner;
+        state.popup.multi = multi;
+        state.popup.anchor = anchor;
+        state.popup.width = width;
+        state.popup.opened_frame = ImGui::GetFrameCount();
     }
 
-    Row ColorRow(const char* label, float* color)
+    void RowControl(ImDrawList* d, ImVec2 card, float width, int row, const Row& item, int& control_id)
     {
-        Row r;
-        r.label = label;
-        r.type = Ctl::Color;
-        r.color = color;
-        return r;
-    }
-
-    Row TextRow(const char* label, const char* value)
-    {
-        Row r;
-        r.label = label;
-        r.type = Ctl::Text;
-        r.text = value;
-        return r;
-    }
-
-    // RAGE -----------------------------------------------------------------
-    const Row kRagePlayer[] = {
-        ToggleRow("Move Before Timer", &rage::MBT),
-        ToggleRow("No Clip", &rage::flight),
-        SliderRow("Speed", &rage::flight_speed, 1.0f, 20.0f, "%.1f"),
-        ToggleRow("No Fall Damage", &rage::no_fall_damage),
-        ToggleRow("Wallbang", &rage::wallbang),
-    };
-    const Row kRageWeapon[] = {
-        ToggleRow("Infinity Ammo", &rage::infinity_ammo),
-        ToggleRow("Rapid Fire", &rage::rapid_fire),
-        ToggleRow("No Recoil", &rage::no_recoil),
-        ToggleRow("No Spread", &rage::no_spread),
-    };
-    const Row kRageBomb[] = {
-        ToggleRow("Fast Defuse", &rage::fast_defuse),
-        ToggleRow("Auto Win", &rage::auto_win),
-    };
-    const Card kRageCards[] = {
-        { "PLAYER", kRagePlayer, IM_ARRAYSIZE(kRagePlayer) },
-        { "WEAPON", kRageWeapon, IM_ARRAYSIZE(kRageWeapon) },
-        { "BOMB", kRageBomb, IM_ARRAYSIZE(kRageBomb) },
-    };
-
-    // AIM ------------------------------------------------------------------
-    const Row kAimMain[] = {
-        ToggleRow("Aimbot", &aim::aimbot),
-        ToggleRow("Silent", &aim::silent),
-        ToggleRow("Automatic Fire", &aim::automatic_fire),
-        SliderRow("FOV", &aim::fov_radius, 15.0f, 180.0f, "%.0f"),
-        SliderRow("Smooth", &aim::aimbot_smoothing, 0.0f, 100.0f, "%.0f%%"),
-        SelectRow("Hitbox", &aim::current_aimbot_hitbox, aim::aimbot_hitboxes, IM_ARRAYSIZE(aim::aimbot_hitboxes)),
-        ToggleRow("RCS", &aim::RCS),
-    };
-    const Row kAimExtra[] = {
-        ToggleRow("Show FOV", &aim::draw_fov),
-        ColorRow("FOV Color", aim::fov_color),
-        ToggleRow("Visualize Bullets", &aim::aim_visualize_bullet),
-    };
-    const Row kAimAnti[] = {
-        ToggleRow("Enabled", &aim::anti_aim),
-        SliderRow("Pitch", &aim::anti_pitch, -90.0f, 180.0f, "%.0f"),
-        SliderRow("Yaw", &aim::anti_yaw, -180.0f, 180.0f, "%.0f"),
-    };
-    const Card kAimCards[] = {
-        { "AIMBOT", kAimMain, IM_ARRAYSIZE(kAimMain) },
-        { "FOV & OTHER", kAimExtra, IM_ARRAYSIZE(kAimExtra) },
-        { "ANTI-AIM", kAimAnti, IM_ARRAYSIZE(kAimAnti) },
-    };
-
-    // VISUALS --------------------------------------------------------------
-    const Row kVisualPlayerA[] = {
-        ToggleRow("Enabled", &visuals::esp_enabled),
-        ToggleRow("Box", &visuals::box2D),
-        ToggleRow("Filled", &visuals::boxFill),
-        SelectRow("Box Type", &visuals::current_box_type, visuals::box_type, IM_ARRAYSIZE(visuals::box_type)),
-        ToggleRow("Skeleton", &visuals::skeleton),
-        ToggleRow("Health Bar", &visuals::healthBar),
-    };
-    const Row kVisualPlayerB[] = {
-        ToggleRow("Health Text", &visuals::healthBarText),
-        ToggleRow("Names", &visuals::names),
-        ToggleRow("Weapon Text", &visuals::weaponText),
-        ToggleRow("Weapon Icon", &visuals::weaponIcon),
-        ToggleRow("Distance", &visuals::distance),
-        ToggleRow("Tracer", &visuals::tracer),
-    };
-    const Row kVisualPlayerColors[] = {
-        ColorRow("Box Color", visuals::box_color),
-        ColorRow("Fill Color", visuals::box_fill_color),
-        ColorRow("Skeleton Color", visuals::skeleton_color),
-        ColorRow("Health Color", visuals::healthbar_color),
-        ColorRow("Name Color", visuals::names_color),
-        ColorRow("Weapon Color", visuals::weapon_text_color),
-        ColorRow("Distance Color", visuals::distance_color),
-        ColorRow("Tracer Color", visuals::tracer_color),
-    };
-    const Card kVisualPlayers[] = {
-        { "PLAYER ESP", kVisualPlayerA, IM_ARRAYSIZE(kVisualPlayerA) },
-        { "PLAYER INFO", kVisualPlayerB, IM_ARRAYSIZE(kVisualPlayerB) },
-        { "COLORS", kVisualPlayerColors, IM_ARRAYSIZE(kVisualPlayerColors) },
-    };
-
-    const Row kVisualBomb[] = {
-        ToggleRow("Bomb Timer", &visuals::bomb_timer_bar),
-        ColorRow("Timer Color", visuals::bomb_timer_color),
-    };
-    const Row kVisualGrenade[] = {
-        ToggleRow("Trajectory", &visuals::visualize_grenade_trajectory),
-        ColorRow("Trajectory Color", visuals::grenade_trajectory_color),
-    };
-    const Card kVisualWorld[] = {
-        { "BOMB", kVisualBomb, IM_ARRAYSIZE(kVisualBomb) },
-        { "GRENADE", kVisualGrenade, IM_ARRAYSIZE(kVisualGrenade) },
-    };
-
-    // SETTINGS -------------------------------------------------------------
-    const Row kSettingsMenu[] = {
-        ToggleRow("Watermark", &settings::watermark),
-        ToggleRow("Overlay", &settings::overlay),
-    };
-    const Row kSettingsAppearance[] = {
-        SelectRow("Theme", &settings::current_theme, settings::theme_type, IM_ARRAYSIZE(settings::theme_type)),
-    };
-    const Row kSettingsAbout[] = {
-        TextRow("Version", "v0.0.4b"),
-        TextRow("Platform", "iOS"),
-        TextRow("Author", "wurvt"),
-    };
-    const Card kSettingsCards[] = {
-        { "MENU", kSettingsMenu, IM_ARRAYSIZE(kSettingsMenu) },
-        { "APPEARANCE", kSettingsAppearance, IM_ARRAYSIZE(kSettingsAppearance) },
-        { "ABOUT", kSettingsAbout, IM_ARRAYSIZE(kSettingsAbout) },
-    };
-
-    struct NavItem
-    {
-        const char* label;
-        const char* icon;
-        int page;
-    };
-
-    const NavItem kNav[] = {
-        { "Rage", MENU_ICON_FIRE, PageRage },
-        { "Aim", MENU_ICON_CROSSHAIRS, PageAim },
-        { "Visuals", MENU_ICON_EYE, PageVisuals },
-        { "Settings", MENU_ICON_SLIDERS, PageSettings },
-    };
-
-    // ---------------------------------------------------------------------
-    // Controls
-    // ---------------------------------------------------------------------
-    void OpenSelect(int* target, const char* const* items, int count, ImVec2 anchor, float width)
-    {
-        const bool same = state.popup_open && state.popup_target == target;
-        state.popup_open = !same;
-        state.popup_target = target;
-        state.popup_items = items;
-        state.popup_count = count;
-        state.popup_anchor = anchor;
-        state.popup_width = width;
-        if (!same)
-            state.popup_opened_frame = ImGui::GetFrameCount();
-    }
-
-    void ToggleControl(ImDrawList* d, float right, float y, float h, bool* value, bool interactive)
-    {
-        const ImVec2 p(right, y + (h - 18.0f) * 0.5f);
-        const ImGuiID id = ImGui::GetID("##tg");
-        float response = 0.0f;
-        if (interactive)
-        {
-            if (Hit("##tg", ImVec2(p.x - 6.0f, p.y - 7.0f), ImVec2(41.0f, 32.0f)))
-                *value = !*value;
-            response = ImGui::IsItemHovered() ? 1.0f : 0.0f;
-        }
-
-        const float on = Motion(id ^ 0x55aa721u, *value ? 1.0f : 0.0f, 19.0f);
-        const float hover = Motion(id ^ 0x118a0u, response, 20.0f);
-
-        d->AddRectFilled(p - ImVec2(1.0f + hover, 1.0f + hover), p + ImVec2(30.0f + hover, 19.0f + hover),
-                         C(75, 126, 255, (int)(45 * hover)), 10.0f);
-        d->AddRectFilled(p, p + ImVec2(29.0f, 18.0f), Mix(C(29, 33, 43), C(75, 126, 255), on), 9.0f);
-        d->AddCircleFilled(p + ImVec2(ImLerp(9.0f, 20.0f, on), 9.0f), 7.0f,
-                           Mix(C(133, 144, 156), C(248, 249, 252), on));
-    }
-
-    void SelectControl(ImDrawList* d, const Row& item, ImVec2 card, float width, float row_h, float y, bool interactive)
-    {
-        const float cw = ImMin(112.0f, width * 0.46f);
-        const float ch = 24.0f;
-        const ImVec2 cp(card.x + width - cw - 12.0f, y + (row_h - ch) * 0.5f);
-        const ImGuiID id = ImGui::GetID("##select");
-        float response = 0.0f;
-
-        if (interactive)
-        {
-            const bool click = Hit("##select", ImVec2(cp.x, y), ImVec2(cw, row_h));
-            response = ImGui::IsItemHovered() ? 1.0f : 0.0f;
-            if (click)
-                OpenSelect(item.select, item.items, item.count, ImVec2(cp.x, cp.y + ch * 0.5f), ImMax(120.0f, cw));
-        }
-        const float hover = Motion(id ^ 0x6161u, response, 16.0f);
-
-        d->AddRectFilled(cp, cp + ImVec2(cw, ch), Mix(C(25, 28, 38), C(31, 38, 54), hover), 5.0f);
-        d->AddRect(cp, cp + ImVec2(cw, ch), Mix(C(32, 35, 46), C(75, 126, 255), hover), 5.0f);
-
-        const char* value = (item.items != nullptr && item.select != nullptr &&
-                             *item.select >= 0 && *item.select < item.count)
-                                ? item.items[*item.select]
-                                : "Select";
-        const float value_h = ImGui::GetFont()->CalcTextSizeA(kControl, FLT_MAX, 0.0f, value).y;
-        TextClamp(d, ImVec2(cp.x + 7.0f, cp.y + std::floor((ch - value_h) * 0.5f)), kControl, cw - 26.0f,
-                  C(170, 173, 184), value);
-        d->AddLine(cp + ImVec2(cw - 13.0f, 9.0f), cp + ImVec2(cw - 9.0f, 13.0f), C(139, 143, 154), 1.0f);
-        d->AddLine(cp + ImVec2(cw - 9.0f, 13.0f), cp + ImVec2(cw - 5.0f, 9.0f), C(139, 143, 154), 1.0f);
-    }
-
-    void SliderControl(ImDrawList* d, const Row& item, ImVec2 card, float width, float row_h, float y, bool interactive)
-    {
-        const float track_w = ImMin(70.0f, width * 0.34f);
-        const float pill_w = 38.0f;
-        const float x = card.x + width - 12.0f - pill_w - 8.0f - track_w;
-        const float cy = y + row_h * 0.5f;
-        const ImGuiID id = ImGui::GetID("##slider");
-
-        if (interactive)
-        {
-            Hit("##slider", ImVec2(x - 6.0f, cy - 15.0f), ImVec2(track_w + 12.0f, 30.0f));
-            if (ImGui::IsItemActive())
-            {
-                const float t = ImClamp((ImGui::GetIO().MousePos.x - x) / track_w, 0.0f, 1.0f);
-                *item.slider = item.lo + t * (item.hi - item.lo);
-            }
-        }
-
-        float norm = (item.hi > item.lo) ? (*item.slider - item.lo) / (item.hi - item.lo) : 0.0f;
-        norm = ImClamp(norm, 0.0f, 1.0f);
-        const float shown = Motion(id ^ 0xa8f1u, norm, 14.0f, norm);
-
-        d->AddRectFilled(ImVec2(x, cy - 1.5f), ImVec2(x + track_w, cy + 1.5f), C(34, 38, 48), 2.0f);
-        d->AddRectFilled(ImVec2(x, cy - 1.5f), ImVec2(x + track_w * shown, cy + 1.5f), C(75, 126, 255), 2.0f);
-        d->AddCircleFilled(ImVec2(x + track_w * shown, cy), 6.0f, C(247, 248, 252));
-
-        const ImVec2 pill(x + track_w + 8.0f, y + (row_h - 20.0f) * 0.5f);
-        d->AddRectFilled(pill, pill + ImVec2(pill_w, 20.0f), C(25, 28, 38), 5.0f);
-
-        char buffer[48];
-        snprintf(buffer, sizeof(buffer), item.fmt, *item.slider);
-        const float tw = ImGui::GetFont()->CalcTextSizeA(kControl, FLT_MAX, 0.0f, buffer).x;
-        TextY(d, pill.x + (pill_w - tw) * 0.5f, pill.y, 20.0f, C(166, 169, 179), buffer, kControl);
-    }
-
-    void RowControl(ImDrawList* d, ImVec2 card, float width, float row_h, int row, const Row& item, bool interactive)
-    {
-        const float y = card.y + 3.0f + row * row_h;
-        if (row > 0)
-            d->AddLine(ImVec2(card.x + 12.0f, y), ImVec2(card.x + width - 12.0f, y), C(28, 31, 40));
-
-        const bool blocked = !interactive;
-
-        // Geometry of the right-hand control (used to clamp the label).
-        float control_left = card.x + width - 12.0f - 29.0f;
-        float label_size = kBody;
-        if (item.type == Ctl::Toggle)
-            control_left = card.x + width - 12.0f - 29.0f;
-        else if (item.type == Ctl::Select)
-            control_left = card.x + width - 12.0f - ImMin(112.0f, width * 0.46f);
-        else if (item.type == Ctl::Slider)
-            control_left = card.x + width - 12.0f - 38.0f - 8.0f - ImMin(70.0f, width * 0.34f);
-        else if (item.type == Ctl::Color)
-            control_left = card.x + width - 12.0f - 18.0f;
-        else
-            control_left = card.x + width * 0.62f;
-
-        const float label_x = card.x + 12.0f;
-        const float label_w = ImMax(0.0f, control_left - label_x - 8.0f);
-        TextClamp(d, ImVec2(label_x, y + (row_h - kBody) * 0.5f - 1.0f), label_size, label_w,
-                  item.type == Ctl::Text ? C(160, 164, 174) : C(207, 209, 218), item.label);
-
-        ImGui::PushID(row);
+        const float y = card.y + row * 37.0f;
+        if (row) d->AddLine(P(card.x + 12, y), P(card.x + width - 12, y), C(28, 31, 40), S(1.0f));
+        const bool disabled = item.type == NeverloseControl::Disabled;
+        TextY(d, card.x + 13, y, 37, disabled ? C(92, 96, 107) : C(207, 209, 218), item.label, kTextBody);
+        const int id = control_id++ + static_cast<int>(state.page) * 24;
         switch (item.type)
         {
-        case Ctl::Toggle:
-            ToggleControl(d, card.x + width - 12.0f - 29.0f, y, row_h, item.toggle, !blocked);
+        case NeverloseControl::Toggle:
+            Toggle(d, id, ImVec2(card.x + width - 43, y + 9), true, item.bind_toggle);
             break;
-        case Ctl::Select:
-            SelectControl(d, item, card, width, row_h, y, !blocked);
+        case NeverloseControl::Disabled:
+            Toggle(d, id, ImVec2(card.x + width - 43, y + 9), false);
             break;
-        case Ctl::Slider:
-            SliderControl(d, item, card, width, row_h, y, !blocked);
-            break;
-        case Ctl::Color:
+        case NeverloseControl::Select:
+        case NeverloseControl::MultiSelect:
         {
-            const ImVec2 swatch(card.x + width - 12.0f - 18.0f, y + (row_h - 18.0f) * 0.5f);
-            if (blocked)
+            const float cw = ImMin(134.0f, width * 0.48f);
+            const ImVec2 cp(card.x + width - cw - 13, y + 7);
+            ImGui::PushID(id);
+            const bool click = Hit("##select", cp, ImVec2(cw, 23));
+            const ImGuiID iid = ImGui::GetItemID();
+            const float response = Motion(iid ^ 0x6161u, ImGui::IsItemHovered() ? 1.0f : 0.0f);
+            ImGui::PopID();
+            if (click) OpenPopup(id, item.type == NeverloseControl::MultiSelect, cp, item.type == NeverloseControl::MultiSelect ? 134.0f : cw);
+            d->AddRectFilled(P(cp), P(cp + ImVec2(cw, 23)), Mix(C(25, 28, 38), C(31, 38, 54), response), S(5));
+            d->AddRect(P(cp), P(cp + ImVec2(cw, 23)), Mix(C(32, 35, 46), C(75, 126, 255), response), S(5));
+            TextY(d, cp.x + 7, cp.y, 23, C(170, 173, 184), item.value ? item.value : "Select", kTextControl);
+            d->AddLine(P(cp + ImVec2(cw - 13, 9)), P(cp + ImVec2(cw - 9, 13)), C(139, 143, 154), S(1.0f));
+            d->AddLine(P(cp + ImVec2(cw - 9, 13)), P(cp + ImVec2(cw - 5, 9)), C(139, 143, 154), S(1.0f));
+            break;
+        }
+        case NeverloseControl::Slider:
+        {
+            ImVec2 start(card.x + width - 145, y + 18);
+            const float tw = 80.0f;
+            float value;
+            if (item.bind_slider != nullptr)
             {
-                // Static preview while a select popup owns the input, so the
-                // swatch cannot open its picker behind the popup.
-                d->AddRectFilled(swatch, swatch + ImVec2(18.0f, 18.0f),
-                                 ImGui::ColorConvertFloat4ToU32(
-                                     ImVec4(item.color[0], item.color[1], item.color[2], item.color[3])),
-                                 3.0f);
-                d->AddRect(swatch, swatch + ImVec2(18.0f, 18.0f), C(48, 52, 64), 3.0f);
+                const float range = item.bind_hi - item.bind_lo;
+                value = range > 0.0f ? (*item.bind_slider - item.bind_lo) / range : 0.0f;
             }
             else
             {
-                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 2.0f));
-                ImGui::SetCursorScreenPos(swatch);
-                ImGui::SetNextItemWidth(18.0f);
-                ImGui::ColorEdit4("##color", item.color, kColorFlags);
-                ImGui::PopStyleVar();
+                if (!state.slider_initialized[id])
+                {
+                    state.sliders[id] = item.amount;
+                    state.slider_initialized[id] = true;
+                }
+                value = state.sliders[id];
             }
-            break;
-        }
-        case Ctl::Text:
-            if (item.text != nullptr)
+            ImGui::PushID(id);
+            Hit("##slider", start - ImVec2(5, 8), ImVec2(tw + 10, 19));
+            if (ImGui::IsItemActive())
             {
-                const float tw = ImGui::GetFont()->CalcTextSizeA(kControl, FLT_MAX, 0.0f, item.text).x;
-                const float tx = card.x + width - 12.0f - ImMin(tw, width * 0.5f);
-                TextClamp(d, ImVec2(tx, y + (row_h - kControl) * 0.5f - 1.0f),
-                          kControl, width * 0.5f, C(146, 150, 162), item.text);
+                value = ImClamp((ImGui::GetIO().MousePos.x - P(start).x) / S(tw), 0.0f, 1.0f);
+                if (item.bind_slider != nullptr)
+                    *item.bind_slider = item.bind_lo + value * (item.bind_hi - item.bind_lo);
+                else
+                    state.sliders[id] = value;
             }
+            const float shown = Motion(ImGui::GetItemID() ^ 0xa8f1u, value, 14.0f, item.amount);
+            ImGui::PopID();
+            d->AddRectFilled(P(start), P(start + ImVec2(tw, 3)), C(34, 38, 48), S(2));
+            d->AddRectFilled(P(start), P(start + ImVec2(tw * shown, 3)), C(75, 126, 255), S(2));
+            d->AddCircleFilled(P(start + ImVec2(tw * shown, 1.5f)), S(5.5f), C(247, 248, 252));
+            const ImVec2 pill(card.x + width - 55, y + 8);
+            d->AddRectFilled(P(pill), P(pill + ImVec2(42, 21)), C(25, 28, 38), S(5));
+            const char* pill_text = item.value ? item.value : "0%";
+            const float pill_width = ImGui::GetFont()->CalcTextSizeA(S(kTextControl), FLT_MAX, 0.0f, pill_text).x / view.scale;
+            TextY(d, pill.x + (42.0f - pill_width) * 0.5f, pill.y, 21, C(166, 169, 179), pill_text, kTextControl);
             break;
         }
-        ImGui::PopID();
+        case NeverloseControl::Color:
+            d->AddRectFilled(P(ImVec2(card.x + width - 63, y + 11)), P(ImVec2(card.x + width - 48, y + 26)), C(102, 124, 246), S(5));
+            Toggle(d, id, ImVec2(card.x + width - 43, y + 9));
+            break;
+        case NeverloseControl::Chevron:
+            Chevron(d, ImVec2(card.x + width - 22, y + 15), C(187, 190, 199));
+            break;
+        }
     }
 
-    void DrawCard(ImDrawList* d, ImVec2 p, float width, const Card& card, float row_h, bool interactive)
+    void DrawRows(ImDrawList* d, ImVec2 card, float width, const Row* rows, int count, int& control_id)
     {
-        const float height = card.count * row_h + 6.0f;
-        Text(d, p + ImVec2(12.0f, -15.0f), C(89, 94, 106), card.title, kCaption);
-        d->AddRectFilled(p, p + ImVec2(width, height), C(17, 19, 27, 240), 13.0f);
-        d->AddRect(p, p + ImVec2(width, height), C(31, 34, 44), 13.0f);
-
-        // Row indices restart in every card, so scope the widget IDs by the card's
-        // row array to keep toggles/sliders/selects from sharing one ImGui ID.
-        ImGui::PushID(card.rows);
-        for (int i = 0; i < card.count; ++i)
-            RowControl(d, p, width, row_h, i, card.rows[i], interactive);
-        ImGui::PopID();
+        for (int i = 0; i < count; ++i) RowControl(d, card, width, i, rows[i], control_id);
     }
 
-    // ---------------------------------------------------------------------
-    // Select popup
-    // ---------------------------------------------------------------------
-    void PopupLayer(ImDrawList* d, ImVec2 display)
+    void PopupLayer(ImDrawList* d)
     {
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-            state.popup_open = false;
-
-        const float open = Motion(ImGui::GetID("##popup_open"), state.popup_open ? 1.0f : 0.0f, 20.0f, 0.0f);
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) state.popup.open = false;
+        const float open = Motion(ImGui::GetID("##popup_open"), state.popup.open ? 1.0f : 0.0f, 20.0f, 0.0f);
         if (open < 0.002f)
         {
-            if (!state.popup_open)
-            {
-                state.popup_target = nullptr;
-                state.popup_items = nullptr;
-                state.popup_count = 0;
-            }
+            state.popup_rect_min = ImVec2(0, 0);
+            state.popup_rect_max = ImVec2(0, 0);
             return;
         }
-        if (state.popup_target == nullptr || state.popup_items == nullptr || state.popup_count <= 0)
-            return;
-
-        const float row_h = 30.0f;
-        const ImVec2 size(state.popup_width, state.popup_count * row_h + 8.0f);
-        ImVec2 p(state.popup_anchor.x, state.popup_anchor.y - size.y * 0.5f);
-        p.x = ImClamp(p.x, 10.0f, ImMax(10.0f, display.x - size.x - 10.0f));
-        p.y = ImClamp(p.y, 10.0f, ImMax(10.0f, display.y - size.y - 10.0f));
+        static const char* const multi_items[] = { "Head", "Chest", "Stomach", "Arms", "Legs", "Feet" };
+        static const char* const single_items[] = { "Off", "Latency", "Performance" };
+        const char* const* options = state.popup.multi ? multi_items : single_items;
+        const int count = state.popup.multi ? 6 : 3;
+        const ImVec2 size(state.popup.width, count * 32.0f + 8.0f);
+        ImVec2 p(state.popup.anchor.x, state.popup.anchor.y + (23.0f - size.y) * 0.5f);
+        p.x = ImClamp(p.x, 10.0f, kCanvas.x - size.x - 10.0f);
+        p.y = ImClamp(p.y, 10.0f, kCanvas.y - size.y - 10.0f);
+        state.popup_rect_min = p;
+        state.popup_rect_max = p + size;
 
         const int first = d->VtxBuffer.Size;
-        d->AddRectFilled(p - ImVec2(5.0f, 2.0f), p + size + ImVec2(5.0f, 8.0f), C(0, 0, 0, 55), 18.0f);
-        d->AddRectFilled(p, p + size, C(20, 20, 29, 245), 16.0f);
-        d->AddRect(p, p + size, C(57, 61, 76, 205), 16.0f);
-        d->AddLine(p + ImVec2(16.0f, 1.0f), p + ImVec2(size.x - 16.0f, 1.0f), C(255, 255, 255, 22));
-
-        const bool accepts = state.popup_open && ImGui::GetFrameCount() > state.popup_opened_frame;
+        d->AddRectFilled(P(p - ImVec2(5, 2)), P(p + size + ImVec2(5, 8)), C(0, 0, 0, 55), S(18));
+        d->AddRectFilled(P(p), P(p + size), C(20, 20, 29, 235), S(16));
+        d->AddRect(P(p), P(p + size), C(57, 61, 76, 205), S(16));
+        d->AddLine(P(p + ImVec2(16, 1)), P(p + ImVec2(size.x - 16, 1)), C(255, 255, 255, 22), S(1.0f));
+        const bool accepts = ImGui::GetFrameCount() > state.popup.opened_frame;
         bool hovered_any = false;
-        bool close = false;
-
-        for (int i = 0; i < state.popup_count; ++i)
+        for (int i = 0; i < count; ++i)
         {
-            const ImVec2 rp = p + ImVec2(4.0f, 4.0f + i * row_h);
-            ImGui::PushID(9000 + i);
-            const bool clicked = Hit("##popup_row", rp, ImVec2(size.x - 8.0f, row_h));
+            ImVec2 rp = p + ImVec2(4, 4 + i * 32.0f);
+            ImGui::PushID(5000 + i);
+            const bool clicked = Hit("##popup_row", rp, ImVec2(size.x - 8, 32));
             hovered_any |= ImGui::IsItemHovered();
             const float hover = Motion(ImGui::GetItemID() ^ 0x9921u, ImGui::IsItemHovered() ? 1.0f : 0.0f, 22.0f);
             ImGui::PopID();
-
-            if (hover > 0.001f)
-                d->AddRectFilled(rp, rp + ImVec2(size.x - 8.0f, row_h), C(75, 126, 255, (int)(25 * hover)), 10.0f);
-
-            const bool selected = state.popup_target != nullptr && *state.popup_target == i;
-            if (selected)
-                Check(d, rp + ImVec2(14.0f, row_h * 0.5f), C(230, 233, 241));
-            TextY(d, rp.x + 35.0f, rp.y, row_h, selected ? C(224, 229, 243) : C(182, 185, 196),
-                  state.popup_items[i], kControl);
-
+            if (hover > 0.001f) d->AddRectFilled(P(rp), P(rp + ImVec2(size.x - 8, 32)), C(75, 126, 255, (int)(25 * hover)), S(10));
+            const bool selected = state.popup.multi ? (state.popup.mask & (1u << i)) != 0 : state.popup.selected == i;
+            if (selected) Check(d, rp + ImVec2(14, 16), C(230, 233, 241));
+            TextY(d, rp.x + 35, rp.y, 32, selected ? C(224, 229, 243) : C(182, 185, 196), options[i], kTextControl);
             if (accepts && clicked)
             {
-                *state.popup_target = i;
-                close = true;
+                if (state.popup.multi) state.popup.mask ^= 1u << i;
+                else { state.popup.selected = i; state.popup.open = false; }
             }
         }
-
-        if (state.popup_open && ImGui::IsMouseClicked(0) && !hovered_any &&
-            ImGui::GetFrameCount() > state.popup_opened_frame)
-            close = true;
-        if (close)
-            state.popup_open = false;
-
+        if (state.popup.open && accepts && ImGui::IsMouseClicked(0) && !hovered_any)
+            state.popup.open = false;
         const float eased = 1.0f - std::pow(1.0f - open, 3.0f);
-        const ImVec2 pivot(p.x + size.x * 0.5f, p.y + size.y * 0.5f);
+        const ImVec2 pivot = P(p + size * 0.5f);
         for (int i = first; i < d->VtxBuffer.Size; ++i)
         {
             ImDrawVert& v = d->VtxBuffer[i];
-            v.pos = pivot + (v.pos - pivot) * ImLerp(0.96f, 1.0f, eased) + ImVec2(4.0f * (1.0f - eased), 0.0f);
+            v.pos = pivot + (v.pos - pivot) * ImLerp(0.96f, 1.0f, eased) + ImVec2(S(4.0f) * (1.0f - eased), 0);
             const ImU32 a = (v.col >> IM_COL32_A_SHIFT) & 255u;
             v.col = (v.col & 0x00ffffffu) | ((ImU32)(a * eased) << IM_COL32_A_SHIFT);
         }
     }
 
-    // ---------------------------------------------------------------------
-    // Navigation
-    // ---------------------------------------------------------------------
-    void ChangePage(int page)
+    void ChangePage(NeverlosePage next)
     {
-        if (state.page == page)
-            return;
-        state.page = page;
+        if (state.page == next) return;
+        state.previous = state.page;
+        state.page = next;
         state.page_mix = 0.0f;
-        state.scroll = 0.0f;
-        state.popup_open = false;
+        state.popup.open = false;
     }
 
-    void NavItemDraw(ImDrawList* d, ImVec2 p, ImVec2 size, const NavItem& item, bool selected, bool horizontal)
+    void Sidebar(ImDrawList* d, ImVec2 base)
     {
-        ImGui::PushID(item.page);
-        const bool clicked = Hit("##nav", p, size);
-        const ImGuiID id = ImGui::GetItemID();
-        const float response = ImGui::IsItemHovered() ? 0.5f : 0.0f;
-        const float r = Motion(id ^ 0x7771u, selected ? 1.0f : response);
-        ImGui::PopID();
+        ImFont* strong = menu_fonts::strong();
+        d->AddRectFilled(P(base), P(base + ImVec2(158, 576)), C(18, 21, 30, 231), S(14), ImDrawFlags_RoundCornersLeft);
+        d->AddRectFilled(P(base + ImVec2(145, 0)), P(base + ImVec2(158, 576)), C(18, 21, 30, 231));
+        d->AddLine(P(base + ImVec2(158, 0)), P(base + ImVec2(158, 576)), C(30, 33, 43), S(1.0f));
+        d->AddRectFilled(P(base + ImVec2(15, 11)), P(base + ImVec2(45, 43)), C(8, 27, 48), S(7));
+        Text(d, base + ImVec2(21, 18), C(94, 185, 255), "NL", kTextTitle, strong);
+        Text(d, base + ImVec2(53, 14), C(228, 230, 236), "Neverlose", kTextTitle, strong);
+        Text(d, base + ImVec2(53, 33), C(91, 96, 108), "Counter-Strike 2", 8);
+        d->AddLine(P(base + ImVec2(10, 56)), P(base + ImVec2(147, 56)), C(28, 31, 41), S(1.0f));
+        Text(d, base + ImVec2(16, 67), C(91, 96, 108), "AIMBOT", kTextCaption);
+        Text(d, base + ImVec2(16, 169), C(91, 96, 108), "COMMON", kTextCaption);
 
-        if (clicked)
-            ChangePage(item.page);
-
-        if (r > 0.001f)
-            d->AddRectFilled(p, p + size, Mix(C(18, 21, 30, 0), C(39, 43, 54), r), 6.0f);
-
-        if (horizontal)
+        auto nav = [&](int id, const char* icon, const char* label, float y, NeverlosePage target, bool selected, float indent = 0.0f)
         {
-            const float label_w = ImGui::GetFont()->CalcTextSizeA(kBody, FLT_MAX, 0.0f, item.label).x;
-            const float icon_w = ImGui::GetFont()->CalcTextSizeA(kIcon, FLT_MAX, 0.0f, item.icon).x;
-            const float total = icon_w + 6.0f + label_w;
-            const float x = p.x + (size.x - total) * 0.5f;
-            TextY(d, x, p.y, size.y, Mix(C(137, 142, 153), C(82, 141, 255), r), item.icon, kIcon);
-            TextY(d, x + icon_w + 6.0f, p.y, size.y, Mix(C(145, 149, 159), C(226, 228, 235), r), item.label, kBody);
-        }
-        else
-        {
-            TextY(d, p.x + 10.0f, p.y, size.y, Mix(C(137, 142, 153), C(82, 141, 255), r), item.icon, kIcon);
-            TextY(d, p.x + 31.0f, p.y, size.y, Mix(C(145, 149, 159), C(226, 228, 235), r), item.label, kBody);
-        }
-    }
-
-    void DrawSidebar(ImDrawList* d, ImVec2 base, ImVec2 size, bool* open)
-    {
-        d->AddRectFilled(base, base + ImVec2(kSidebarW, size.y), C(18, 21, 30, 250), 14.0f, ImDrawFlags_RoundCornersLeft);
-        d->AddRectFilled(base + ImVec2(kSidebarW - 13.0f, 0.0f), base + ImVec2(kSidebarW, size.y), C(18, 21, 30, 250));
-        d->AddLine(base + ImVec2(kSidebarW, 0.0f), base + ImVec2(kSidebarW, size.y), C(30, 33, 43));
-
-        d->AddRectFilled(base + ImVec2(13.0f, 12.0f), base + ImVec2(43.0f, 42.0f), C(8, 27, 48), 7.0f);
-        Text(d, base + ImVec2(19.0f, 18.0f), C(94, 185, 255), "SY", kTitle, StrongFont());
-        Text(d, base + ImVec2(51.0f, 12.0f), C(228, 230, 236), "Synapse", kTitle, StrongFont());
-        Text(d, base + ImVec2(52.0f, 30.0f), C(91, 96, 108), "iOS build", kSmall);
-        d->AddLine(base + ImVec2(10.0f, 54.0f), base + ImVec2(kSidebarW - 10.0f, 54.0f), C(28, 31, 41));
-
-        Text(d, base + ImVec2(15.0f, 64.0f), C(91, 96, 108), "COMBAT", kCaption);
-        NavItemDraw(d, base + ImVec2(7.0f, 78.0f), ImVec2(kSidebarW - 14.0f, 30.0f), kNav[0], state.page == PageRage, false);
-        NavItemDraw(d, base + ImVec2(7.0f, 112.0f), ImVec2(kSidebarW - 14.0f, 30.0f), kNav[1], state.page == PageAim, false);
-
-        Text(d, base + ImVec2(15.0f, 149.0f), C(91, 96, 108), "VISUALS", kCaption);
-        NavItemDraw(d, base + ImVec2(7.0f, 163.0f), ImVec2(kSidebarW - 14.0f, 30.0f), kNav[2], state.page == PageVisuals, false);
-
-        Text(d, base + ImVec2(15.0f, 200.0f), C(91, 96, 108), "CONFIG", kCaption);
-        NavItemDraw(d, base + ImVec2(7.0f, 214.0f), ImVec2(kSidebarW - 14.0f, 30.0f), kNav[3], state.page == PageSettings, false);
-
-        Text(d, base + ImVec2(15.0f, size.y - 26.0f), C(70, 74, 84), "v0.0.4b", kSmall);
-        (void)open;
-    }
-
-    void DrawTopBar(ImDrawList* d, ImVec2 base, ImVec2 size, bool* open)
-    {
-        d->AddRectFilled(base, base + ImVec2(size.x, 48.0f), C(11, 13, 20, 248), 14.0f,
-                         ImDrawFlags_RoundCornersTopLeft | ImDrawFlags_RoundCornersTopRight);
-        d->AddRectFilled(base + ImVec2(13.0f, 11.0f), base + ImVec2(39.0f, 37.0f), C(8, 27, 48), 7.0f);
-        Text(d, base + ImVec2(18.0f, 15.0f), C(94, 185, 255), "SY", 14.0f, StrongFont());
-        Text(d, base + ImVec2(47.0f, 8.0f), C(228, 230, 236), "Synapse", 14.0f, StrongFont());
-        Text(d, base + ImVec2(48.0f, 26.0f), C(91, 96, 108), "iOS build", kCaption);
-
-        const ImVec2 close_c(base.x + size.x - 24.0f, base.y + 24.0f);
-        const bool close = Hit("##close_top", close_c - ImVec2(22.0f, 20.0f), ImVec2(44.0f, 40.0f));
-        if (ImGui::IsItemHovered())
-            d->AddCircleFilled(close_c, 13.0f, C(39, 43, 54));
-        CloseCross(d, close_c, C(180, 184, 194));
-        if (close)
-            *open = false;
-
-        const float cell_w = (size.x - 16.0f) / 4.0f;
-        for (int i = 0; i < 4; ++i)
-            NavItemDraw(d, base + ImVec2(8.0f + i * cell_w, 50.0f), ImVec2(cell_w, 40.0f), kNav[i],
-                        state.page == kNav[i].page, true);
-        d->AddLine(base + ImVec2(0.0f, 91.0f), base + ImVec2(size.x, 91.0f), C(27, 30, 39));
-    }
-
-    void DrawToolbar(ImDrawList* d, ImVec2 base, ImVec2 size, bool* open)
-    {
-        d->AddRectFilled(base + ImVec2(kSidebarW, 0.0f), base + ImVec2(size.x, kToolbarH), C(11, 13, 20, 245),
-                         14.0f, ImDrawFlags_RoundCornersTopRight);
-        d->AddLine(base + ImVec2(kSidebarW, kToolbarH), base + ImVec2(size.x, kToolbarH), C(27, 30, 39));
-
-        const char* titles[] = { "RAGE", "AIM", "VISUALS", "SETTINGS" };
-        d->AddRectFilled(base + ImVec2(kSidebarW + 14.0f, 20.0f), base + ImVec2(kSidebarW + 17.0f, 28.0f),
-                         C(78, 131, 255), 1.5f);
-        TextY(d, base.x + kSidebarW + 26.0f, base.y, kToolbarH, C(225, 227, 233), titles[state.page], kBody);
-
-        const ImVec2 close_c(base.x + size.x - 24.0f, base.y + kToolbarH * 0.5f);
-        const bool close = Hit("##close", close_c - ImVec2(22.0f, 20.0f), ImVec2(44.0f, 40.0f));
-        if (ImGui::IsItemHovered())
-            d->AddCircleFilled(close_c, 13.0f, C(39, 43, 54));
-        CloseCross(d, close_c, C(180, 184, 194));
-        if (close)
-            *open = false;
-    }
-
-    void DrawSubTabs(ImDrawList* d, ImVec2 p, float* content_top)
-    {
-        const char* labels[2] = { "Players", "World" };
-        for (int i = 0; i < 2; ++i)
-        {
-            const ImVec2 chip(p.x + i * 92.0f, p.y);
-            const bool selected = state.visuals_tab == i;
-            ImGui::PushID(700 + i);
-            const bool clicked = Hit("##subtab", chip, ImVec2(86.0f, 26.0f));
-            const ImGuiID id = ImGui::GetItemID();
-            const float hover = Motion(id ^ 0x3131u, ImGui::IsItemHovered() ? 1.0f : 0.0f, 18.0f);
+            const ImVec2 p = base + ImVec2(7 + indent, y);
+            ImGui::PushID(id);
+            const bool clicked = Hit("##nav", p, ImVec2(140 - indent, 30));
+            const ImGuiID iid = ImGui::GetItemID();
+            const float r = Motion(iid ^ 0x7771u, selected ? 1.0f : ImGui::IsItemHovered() ? 0.48f : 0.0f);
             ImGui::PopID();
-            if (clicked)
-            {
-                state.visuals_tab = i;
-                state.scroll = 0.0f;
-                state.popup_open = false;
-            }
-            const ImU32 fill = selected ? C(39, 43, 54) : Mix(C(24, 27, 37, 0), C(28, 31, 42), hover);
-            d->AddRectFilled(chip, chip + ImVec2(86.0f, 26.0f), fill, 6.0f);
-            TextY(d, chip.x, chip.y, 26.0f, selected ? C(226, 228, 235) : C(145, 149, 159), labels[i], kControl);
-        }
-        *content_top += 34.0f;
-    }
+            if (clicked) ChangePage(target);
+            if (r > 0.001f) d->AddRectFilled(P(p), P(p + ImVec2(140 - indent, 30)), Mix(C(18, 21, 30, 0), C(39, 43, 54), r), S(6));
+            TextY(d, p.x + 10, p.y, 30, Mix(C(137, 142, 153), C(82, 141, 255), r), icon, kTextIcon);
+            TextY(d, p.x + 31, p.y, 30, Mix(C(145, 149, 159), C(226, 228, 235), r), label, kTextBody);
+        };
 
-    // ---------------------------------------------------------------------
-    // Page layout
-    // ---------------------------------------------------------------------
-    struct PlacedCard
-    {
-        const Card* card = nullptr;
-        ImVec2 pos{};
-        float width = 0.0f;
-    };
-
-    void DrawContent(ImDrawList* d, ImVec2 content, ImVec2 content_size, bool portrait)
-    {
-        if (state.page == PageVisuals)
-            DrawSubTabs(d, content, &content.y);
-        content_size.y = ImMax(40.0f, content_size.y - (state.page == PageVisuals ? 34.0f : 0.0f));
-
-        const Card* cards = nullptr;
-        int card_count = 0;
-        if (state.page == PageRage) { cards = kRageCards; card_count = IM_ARRAYSIZE(kRageCards); }
-        else if (state.page == PageAim) { cards = kAimCards; card_count = IM_ARRAYSIZE(kAimCards); }
-        else if (state.page == PageSettings) { cards = kSettingsCards; card_count = IM_ARRAYSIZE(kSettingsCards); }
-        else
+        const bool visuals = state.page == NeverlosePage::Players || state.page == NeverlosePage::World;
+        nav(0, MENU_ICON_CROSSHAIRS, "Rage", 84, NeverlosePage::Rage, state.page == NeverlosePage::Rage);
+        nav(1, MENU_ICON_MOUSE, "Legit", 120, NeverlosePage::Legit, state.page == NeverlosePage::Legit);
+        nav(2, MENU_ICON_IMAGE, "Visuals", 190, NeverlosePage::Players, visuals);
+        const float expand = Motion(ImGui::GetID("##visual_expand"), visuals ? 1.0f : 0.0f, 18.0f);
+        if (expand > 0.02f)
         {
-            cards = state.visuals_tab == 0 ? kVisualPlayers : kVisualWorld;
-            card_count = state.visuals_tab == 0 ? IM_ARRAYSIZE(kVisualPlayers) : IM_ARRAYSIZE(kVisualWorld);
-        }
-
-        const float row_h = portrait ? 28.0f : 30.0f;
-        int columns = portrait ? 1 : (content_size.x >= 500.0f ? 3 : 2);
-        if (content_size.x < 330.0f)
-            columns = 1;
-        const float card_w = (content_size.x - (columns - 1) * kGap) / columns;
-
-        PlacedCard placed[8];
-        float column_y[4] = { content.y, content.y, content.y, content.y };
-        int max_cards = card_count < 8 ? card_count : 8;
-
-        for (int i = 0; i < max_cards; ++i)
-        {
-            int best = 0;
-            for (int c = 1; c < columns; ++c)
-                if (column_y[c] < column_y[best] - 0.1f)
-                    best = c;
-
-            placed[i].card = &cards[i];
-            placed[i].pos = ImVec2(content.x + best * (card_w + kGap), column_y[best] + kTitleH);
-            placed[i].width = card_w;
-            column_y[best] += kTitleH + cards[i].count * row_h + 6.0f + kGap;
-        }
-
-        float content_h = 0.0f;
-        for (int c = 0; c < columns; ++c)
-            content_h = ImMax(content_h, column_y[c] - content.y);
-        const float max_scroll = ImMax(0.0f, content_h - content_size.y);
-
-        // Touch scrolling. A full-area InvisibleButton here would steal clicks from
-        // the rows, so the drag is tracked from the raw mouse state and only starts
-        // on empty space. Sliders/toggles keep ownership of their own drags.
-        const ImGuiIO& io = ImGui::GetIO();
-        if (max_scroll > 0.0f)
-        {
-            if (ImGui::IsMouseClicked(0) && ImGui::IsMouseHoveringRect(content, content + content_size) &&
-                !ImGui::IsAnyItemHovered())
-                state.scroll_drag = true;
-            if (!ImGui::IsMouseDown(0) || ImGui::IsAnyItemActive())
-                state.scroll_drag = false;
-            if (state.scroll_drag)
-                state.scroll -= io.MouseDelta.y;
-            state.scroll -= io.MouseWheel * row_h * 2.0f;
-        }
-        else
-        {
-            state.scroll_drag = false;
-        }
-        state.scroll = ImClamp(state.scroll, 0.0f, max_scroll);
-
-        ImGui::PushClipRect(content, content + content_size, true);
-
-        const int content_first = d->VtxBuffer.Size;
-        const bool interactive = !state.popup_open;
-        for (int i = 0; i < max_cards; ++i)
-        {
-            ImVec2 p = placed[i].pos;
-            p.y -= state.scroll;
-            DrawCard(d, p, placed[i].width, *placed[i].card, row_h, interactive);
-        }
-
-        // Page transition: fade + tiny slide, applied to the content vertices only.
-        state.page_mix = ImLerp(state.page_mix, 1.0f, 1.0f - std::exp(-14.0f * ImGui::GetIO().DeltaTime));
-        if (state.page_mix < 0.999f)
-        {
-            const float eased = 1.0f - std::pow(1.0f - state.page_mix, 3.0f);
-            for (int i = content_first; i < d->VtxBuffer.Size; ++i)
+            const int first = d->VtxBuffer.Size;
+            nav(3, MENU_ICON_USER, "Players", 226, NeverlosePage::Players, state.page == NeverlosePage::Players, 14);
+            nav(4, MENU_ICON_GLOBE, "World", 262, NeverlosePage::World, state.page == NeverlosePage::World, 14);
+            for (int i = first; i < d->VtxBuffer.Size; ++i)
             {
                 ImDrawVert& v = d->VtxBuffer[i];
-                v.pos.x += 7.0f * (1.0f - eased);
                 const ImU32 a = (v.col >> IM_COL32_A_SHIFT) & 255u;
-                v.col = (v.col & 0x00ffffffu) | ((ImU32)(a * eased) << IM_COL32_A_SHIFT);
+                v.col = (v.col & 0xffffffu) | ((ImU32)(a * expand) << IM_COL32_A_SHIFT);
             }
         }
+        const float shift = 72.0f * expand;
+        nav(5, MENU_ICON_LAYER_GROUP, "Inventory", 226 + shift, NeverlosePage::Inventory, state.page == NeverlosePage::Inventory);
+        nav(6, MENU_ICON_SLIDERS_H, "Miscellaneous", 262 + shift, NeverlosePage::Miscellaneous, state.page == NeverlosePage::Miscellaneous);
 
-        if (max_scroll > 0.0f)
+        const ImVec2 account = base + ImVec2(7, 531);
+        if (Hit("##account", account, ImVec2(140, 38))) state.account = !state.account;
+        const float ar = Motion(ImGui::GetItemID() ^ 0x1932u, state.account ? 1.0f : ImGui::IsItemHovered() ? 0.5f : 0.0f);
+        if (ar > 0.001f) d->AddRectFilled(P(account), P(account + ImVec2(140, 38)), C(39, 43, 54, (int)(235 * ar)), S(6));
+        Avatar(d, account + ImVec2(7, 5), 28.0f, 14.0f);
+        Text(d, account + ImVec2(43, 4), C(225, 227, 233), "XPTNotFound", kTextControl);
+        Text(d, account + ImVec2(43, 20), C(111, 116, 128), "3 days left", kTextSmall);
+        Chevron(d, account + ImVec2(132, 15), C(181, 185, 195));
+    }
+
+    void Toolbar(ImDrawList* d, ImVec2 base, bool* open)
+    {
+        d->AddRectFilled(P(base + ImVec2(158, 0)), P(base + ImVec2(748, 56)), C(11, 13, 20, 225), S(14), ImDrawFlags_RoundCornersTopRight);
+        d->AddLine(P(base + ImVec2(158, 56)), P(base + ImVec2(748, 56)), C(27, 30, 39), S(1.0f));
+        const ImVec2 profile = base + ImVec2(169, 14);
+        d->AddRectFilled(P(profile), P(profile + ImVec2(166, 30)), C(17, 19, 27), S(6));
+        d->AddRect(P(profile), P(profile + ImVec2(166, 30)), C(28, 31, 41), S(6));
+        TextY(d, profile.x + 12, profile.y, 30, C(194, 197, 206), MENU_ICON_SAVE, kTextIcon);
+        TextY(d, profile.x + 48, profile.y, 30, C(184, 187, 197), "Nonprime 7.2", kTextControl);
+        Chevron(d, profile + ImVec2(148, 11), C(130, 135, 146));
+        if (state.page == NeverlosePage::Rage || state.page == NeverlosePage::Legit)
         {
-            const float ratio = content_size.y / content_h;
-            const float thumb_h = ImMax(24.0f, content_size.y * ratio);
-            const float thumb_y = content.y + (content_size.y - thumb_h) * (state.scroll / max_scroll);
-            d->AddRectFilled(ImVec2(content.x + content_size.x - 4.0f, thumb_y),
-                             ImVec2(content.x + content_size.x, thumb_y + thumb_h), C(78, 131, 255, 130), 2.0f);
+            const ImVec2 global = base + ImVec2(348, 14);
+            d->AddRectFilled(P(global), P(global + ImVec2(85, 30)), C(17, 19, 27), S(6));
+            d->AddRect(P(global), P(global + ImVec2(85, 30)), C(28, 31, 41), S(6));
+            TextY(d, global.x + 13, global.y, 30, C(184, 187, 197), "Global", kTextControl);
+            Chevron(d, global + ImVec2(68, 11), C(130, 135, 146));
         }
 
-        ImGui::PopClipRect();
+        // The original magnifier is decorative; on iOS this spot is the close button.
+        const ImVec2 close = base + ImVec2(719, 28);
+        ImGui::PushID(4242);
+        const bool clicked = Hit("##close", close - ImVec2(15, 15), ImVec2(30, 30));
+        const float hover = Motion(ImGui::GetItemID() ^ 0x5150u, ImGui::IsItemHovered() ? 1.0f : 0.0f, 18.0f);
+        ImGui::PopID();
+        if (hover > 0.001f) d->AddCircleFilled(P(close), S(13), C(39, 43, 54, (int)(235 * hover)));
+        CloseCross(d, close, C(180, 184, 194));
+        if (clicked) *open = false;
     }
-}
+
+    void Rage(ImDrawList* d, ImVec2 b, int& id)
+    {
+        static const Row main[] = {
+            {"Enabled", NeverloseControl::Toggle, nullptr, 0, &aim::aimbot},
+            {"Silent Aim", NeverloseControl::Toggle, nullptr, 0, &aim::silent},
+            {"Automatic Fire", NeverloseControl::Toggle, nullptr, 0, &aim::automatic_fire},
+            {"Aim Through Walls", NeverloseControl::Toggle, nullptr, 0, &rage::wallbang},
+            {"Refine Shot", NeverloseControl::Select, "Latency", 0},
+            {"Field of View", NeverloseControl::Slider, "180.0\xC2\xB0", .74f, nullptr, &aim::fov_radius, 15.0f, 180.0f}
+        };
+        static const Row other[] = {
+            {"History", NeverloseControl::Select, "Maximum", 0},
+            {"Delay Shot", NeverloseControl::Select, "Damage", 0},
+            {"Remove Spread", NeverloseControl::Select, "Full", 0},
+            {"Duck Peek Assist", NeverloseControl::Toggle, nullptr, 0},
+            {"Quick Peek Assist", NeverloseControl::Toggle, nullptr, 0},
+            {"Double Tap", NeverloseControl::Toggle, nullptr, 0}
+        };
+        static const Row selection[] = {
+            {"Prefer", NeverloseControl::Select, "Damage", 0},
+            {"Hitboxes", NeverloseControl::MultiSelect, "Head, Chest, Stom", 0},
+            {"Hit Chance", NeverloseControl::Slider, "0%", .08f},
+            {"Min Damage", NeverloseControl::Slider, "FL", .86f},
+            {"Quick Stop", NeverloseControl::Toggle, nullptr, 0},
+            {"Quick Scope", NeverloseControl::Toggle, nullptr, 0}
+        };
+        static const Row aa[] = {
+            {"Enabled", NeverloseControl::Toggle, nullptr, 0, &aim::anti_aim},
+            {"Suppress Breathing Animations", NeverloseControl::Toggle, nullptr, 0},
+            {"Leg Movement", NeverloseControl::Select, "Walking", 0},
+            {"Pitch", NeverloseControl::Chevron, nullptr, 0},
+            {"Yaw", NeverloseControl::Chevron, nullptr, 0},
+            {"Mouse Override", NeverloseControl::Chevron, nullptr, 0}
+        };
+        const ImVec2 a = b + ImVec2(167, 84), c = b + ImVec2(458, 84), e = b + ImVec2(167, 340), g = b + ImVec2(458, 340);
+        Card(d, a, ImVec2(281, 221), "MAIN");
+        Card(d, c, ImVec2(277, 221), "OTHER");
+        Card(d, e, ImVec2(281, 221), "SELECTION");
+        Card(d, g, ImVec2(277, 221), "ANTI-AIM");
+        DrawRows(d, a, 281, main, 6, id);
+        DrawRows(d, c, 277, other, 6, id);
+        DrawRows(d, e, 281, selection, 6, id);
+        DrawRows(d, g, 277, aa, 6, id);
+    }
+
+    void Legit(ImDrawList* d, ImVec2 b, int& id)
+    {
+        static const Row top[] = {{"Enabled", NeverloseControl::Toggle, nullptr, 0}};
+        static const Row aim[] = {
+            {"Enabled", NeverloseControl::Toggle, nullptr, 0},
+            {"Activation", NeverloseControl::Select, "Assisted", 0},
+            {"Conditions", NeverloseControl::MultiSelect, "Through Walls, Th", 0},
+            {"Hitboxes", NeverloseControl::MultiSelect, "Head", 0},
+            {"Field of View", NeverloseControl::Slider, "20u", .14f},
+            {"Smoothing", NeverloseControl::Slider, "50%", .22f},
+            {"Reaction Time", NeverloseControl::Slider, "0ms", .08f},
+            {"Min Damage", NeverloseControl::Slider, "HP+1", .68f},
+            {"Recoil Control", NeverloseControl::Toggle, nullptr, 0},
+            {"Quick Scope", NeverloseControl::Toggle, nullptr, 0},
+            {"Quick Stop", NeverloseControl::Toggle, nullptr, 0}
+        };
+        static const Row trigger[] = {
+            {"Enabled", NeverloseControl::Toggle, nullptr, 0},
+            {"Conditions", NeverloseControl::MultiSelect, "Through Walls, Th", 0},
+            {"Hitboxes", NeverloseControl::MultiSelect, "Head, Chest, Stom", 0},
+            {"Hit Chance", NeverloseControl::Slider, "Seed", .92f},
+            {"Min Damage", NeverloseControl::Slider, "HP+1", .72f},
+            {"Reaction Time", NeverloseControl::Slider, "0ms", .08f},
+            {"Burst Time", NeverloseControl::Slider, "50ms", .08f},
+            {"Quick Scope", NeverloseControl::Toggle, nullptr, 0}
+        };
+        static const Row other[] = {
+            {"Visualize", NeverloseControl::Toggle, nullptr, 0},
+            {"Automatic Weapons", NeverloseControl::Toggle, nullptr, 0},
+            {"Standalone Recoil Control", NeverloseControl::Toggle, nullptr, 0},
+            {"Randomize", NeverloseControl::Select, "None", 0}
+        };
+        ImVec2 topc = b + ImVec2(167, 84), aimc = b + ImVec2(167, 160), tr = b + ImVec2(458, 84), ot = b + ImVec2(458, 413);
+        Card(d, topc, ImVec2(281, 40), "MAIN");
+        Card(d, aimc, ImVec2(281, 401), "AIMBOT");
+        Card(d, tr, ImVec2(277, 297), "TRIGGERBOT");
+        Card(d, ot, ImVec2(277, 148), "OTHER");
+        DrawRows(d, topc, 281, top, 1, id);
+        DrawRows(d, aimc, 281, aim, 11, id);
+        DrawRows(d, tr, 277, trigger, 8, id);
+        DrawRows(d, ot, 277, other, 4, id);
+    }
+
+    void Soldier(ImDrawList* d, ImVec2 p)
+    {
+        const ImU32 blue = C(91, 133, 255, 210), edge = C(211, 220, 255, 235), dark = C(39, 49, 77, 245);
+        d->AddCircleFilled(P(p + ImVec2(0, -120)), S(22), dark);
+        d->AddCircle(P(p + ImVec2(0, -120)), S(22), edge, 0, S(2));
+        d->AddRectFilled(P(p + ImVec2(-28, -96)), P(p + ImVec2(28, -25)), dark, S(12));
+        d->AddRect(P(p + ImVec2(-28, -96)), P(p + ImVec2(28, -25)), blue, S(12), 0, S(3));
+        d->AddQuadFilled(P(p + ImVec2(-25, -85)), P(p + ImVec2(-48, -30)), P(p + ImVec2(-37, -22)), P(p + ImVec2(-10, -66)), dark);
+        d->AddQuadFilled(P(p + ImVec2(25, -85)), P(p + ImVec2(51, -45)), P(p + ImVec2(41, -35)), P(p + ImVec2(10, -66)), dark);
+        d->AddRectFilled(P(p + ImVec2(-23, -25)), P(p + ImVec2(-4, 60)), dark, S(8));
+        d->AddRectFilled(P(p + ImVec2(4, -25)), P(p + ImVec2(23, 60)), dark, S(8));
+        d->AddLine(P(p + ImVec2(-55, -42)), P(p + ImVec2(62, -53)), edge, S(5));
+        d->AddRectFilled(P(p + ImVec2(30, -58)), P(p + ImVec2(77, -49)), blue, S(2));
+        d->AddCircle(P(p + ImVec2(0, -120)), S(10), blue, 0, S(2));
+        d->AddLine(P(p + ImVec2(-20, -115)), P(p + ImVec2(20, -115)), blue, S(2));
+        d->AddLine(P(p + ImVec2(-35, 62)), P(p + ImVec2(-4, 62)), edge, S(3));
+        d->AddLine(P(p + ImVec2(4, 62)), P(p + ImVec2(35, 62)), edge, S(3));
+    }
+
+    void Players(ImDrawList* d, ImVec2 b, int& id)
+    {
+        static const Row enemy[] = {
+            {"Enabled", NeverloseControl::Toggle, nullptr, 0, &visuals::esp_enabled},
+            {"Offscreen Arrow", NeverloseControl::Color, nullptr, 0},
+            {"Sounds", NeverloseControl::Color, nullptr, 0}
+        };
+        static const Row model[] = {
+            {"Player", NeverloseControl::Select, "Water Flow", 0},
+            {"Behind Walls", NeverloseControl::Select, "Glow Outline", 0},
+            {"On Shot", NeverloseControl::Select, "Solid", 0},
+            {"History", NeverloseControl::Select, "Solid", 0},
+            {"Ragdolls", NeverloseControl::Disabled, nullptr, 0},
+            {"Soul Particles", NeverloseControl::Color, nullptr, 0},
+            {"Glow", NeverloseControl::Color, nullptr, 0}
+        };
+        ImVec2 a = b + ImVec2(177, 86), m = b + ImVec2(177, 239);
+        Card(d, a, ImVec2(300, 116), "ENEMY");
+        Card(d, m, ImVec2(300, 264), "ENEMY MODEL");
+        DrawRows(d, a, 300, enemy, 3, id);
+        DrawRows(d, m, 300, model, 7, id);
+        Text(d, b + ImVec2(557, 75), C(111, 167, 255), "Enemies", kTextControl);
+        Text(d, b + ImVec2(654, 75), C(180, 184, 194), MENU_ICON_USER, kTextIcon);
+        Text(d, b + ImVec2(706, 75), C(180, 184, 194), MENU_ICON_LIST, kTextIcon);
+        Soldier(d, b + ImVec2(626, 438));
+        Text(d, b + ImVec2(609, 116), C(255, 112, 135), "C4", 8);
+        Text(d, b + ImVec2(596, 128), C(253, 213, 90), "Neverlose", 9);
+        Text(d, b + ImVec2(612, 141), C(227, 231, 241), "65%", 8);
+        d->AddRectFilled(P(b + ImVec2(535, 495)), P(b + ImVec2(715, 499)), C(34, 38, 48), S(2));
+        d->AddRectFilled(P(b + ImVec2(535, 495)), P(b + ImVec2(640, 499)), C(75, 126, 255), S(2));
+    }
+
+    void World(ImDrawList* d, ImVec2 b, int& id)
+    {
+        static const Row view_rows[] = {
+            {"View Options", NeverloseControl::Chevron, nullptr, 0},
+            {"Scope Options", NeverloseControl::Chevron, nullptr, 0},
+            {"Viewmodel Options", NeverloseControl::Chevron, nullptr, 0},
+            {"Perspective Options", NeverloseControl::Chevron, nullptr, 0},
+            {"Unlock Spectating", NeverloseControl::Select, "Perspective, Enem", 0},
+            {"Visual Recoil", NeverloseControl::Select, "No Shake, No Rec", 0}
+        };
+        static const Row hud[] = {
+            {"Radar", NeverloseControl::Select, "Reveal Enemies, R", 0},
+            {"Scope Overlay", NeverloseControl::Color, nullptr, 0},
+            {"Inaccuracy Overlay", NeverloseControl::Color, nullptr, 0},
+            {"Death Notices", NeverloseControl::Chevron, nullptr, 0},
+            {"Scoreboard", NeverloseControl::Chevron, nullptr, 0},
+            {"Crosshairs", NeverloseControl::Chevron, nullptr, 0}
+        };
+        static const Row esp[] = {
+            {"Bomb", NeverloseControl::Chevron, nullptr, 0},
+            {"Weapons", NeverloseControl::Chevron, nullptr, 0},
+            {"Hostages", NeverloseControl::Chevron, nullptr, 0},
+            {"Grenades", NeverloseControl::Chevron, nullptr, 0},
+            {"Grenade Trajectory", NeverloseControl::Toggle, nullptr, 0, &visuals::visualize_grenade_trajectory},
+            {"Grenade Proximity Warnings", NeverloseControl::Toggle, nullptr, 0}
+        };
+        static const Row misc[] = {
+            {"Windows", NeverloseControl::Chevron, nullptr, 0},
+            {"Removals", NeverloseControl::Chevron, nullptr, 0},
+            {"Ambience", NeverloseControl::Chevron, nullptr, 0},
+            {"Hit Marker", NeverloseControl::Chevron, nullptr, 0},
+            {"Bullet Tracers", NeverloseControl::Chevron, nullptr, 0},
+            {"Bullet Impacts", NeverloseControl::Color, nullptr, 0}
+        };
+        ImVec2 a = b + ImVec2(177, 84), c = b + ImVec2(478, 84), e = b + ImVec2(177, 350), g = b + ImVec2(478, 350);
+        Card(d, a, ImVec2(291, 221), "VIEW");
+        Card(d, c, ImVec2(257, 221), "HUD");
+        Card(d, e, ImVec2(291, 221), "WORLD ESP");
+        Card(d, g, ImVec2(257, 221), "MISCELLANEOUS");
+        DrawRows(d, a, 291, view_rows, 6, id);
+        DrawRows(d, c, 257, hud, 6, id);
+        DrawRows(d, e, 291, esp, 6, id);
+        DrawRows(d, g, 257, misc, 6, id);
+    }
+
+    void WeaponCell(ImDrawList* d, ImVec2 p, ImVec2 size, int kind, ImU32 accent)
+    {
+        d->AddRectFilled(P(p), P(p + size), C(24, 31, 45, 235), S(9));
+        d->AddRect(P(p), P(p + size), C(35, 45, 62), S(9));
+        d->AddRectFilled(P(p + ImVec2(0, size.y - 3)), P(p + size), accent, 0);
+        const ImU32 gun = C(218, 220, 218), shade = C(104, 111, 118);
+        const float s = ImMin(size.x / 121.0f, size.y / 91.0f);
+        auto q = [&](float x, float y) { return p + ImVec2(x * s, y * s); };
+        if (kind % 3 == 0) {
+            d->AddRectFilled(P(q(25, 28)), P(q(86, 36)), gun, S(2 * s));
+            d->AddRectFilled(P(q(67, 35)), P(q(77, 60)), shade, S(2 * s));
+            d->AddRectFilled(P(q(32, 35)), P(q(41, 55)), gun, S(2 * s));
+        }
+        else if (kind % 3 == 1) {
+            d->AddLine(P(q(18, 55)), P(q(94, 27)), gun, S(7 * s));
+            d->AddRectFilled(P(q(70, 27)), P(q(90, 35)), shade, S(2 * s));
+        }
+        else {
+            d->AddRectFilled(P(q(16, 32)), P(q(96, 39)), gun, S(2 * s));
+            d->AddRectFilled(P(q(30, 39)), P(q(42, 61)), shade, S(2 * s));
+            d->AddRectFilled(P(q(67, 39)), P(q(77, 57)), gun, S(2 * s));
+        }
+    }
+
+    void Inventory(ImDrawList* d, ImVec2 b, int&)
+    {
+        d->AddRectFilled(P(b + ImVec2(159, 57)), P(b + ImVec2(747, 575)), C(17, 27, 42, 155), 0);
+        d->AddRectFilled(P(b + ImVec2(185, 66)), P(b + ImVec2(286, 91)), C(20, 34, 50), S(8));
+        TextY(d, b.x + 199, b.y + 66, 25, C(138, 192, 255), "CT Loadout", kTextControl);
+        Soldier(d, b + ImVec2(264, 388));
+        const ImU32 accents[] = { C(235, 237, 239), C(171, 70, 255), C(75, 116, 255), C(226, 43, 192), C(251, 65, 83), C(134, 72, 255) };
+        for (int r = 0; r < 5; ++r)
+            for (int c = 0; c < 3; ++c)
+                WeaponCell(d, b + ImVec2(390 + c * 116.0f, 88 + r * 96.0f), ImVec2(108, 91), r * 3 + c, accents[(r + c) % 6]);
+        Text(d, b + ImVec2(424, 67), C(205, 209, 219), "Pistols", kTextControl);
+        Text(d, b + ImVec2(536, 67), C(205, 209, 219), "Mid-Tier", kTextControl);
+        Text(d, b + ImVec2(655, 67), C(205, 209, 219), "Rifles", kTextControl);
+        for (int r = 0; r < 2; ++r)
+            for (int c = 0; c < 3; ++c)
+                WeaponCell(d, b + ImVec2(171 + c * 65.0f, 470 + r * 51.0f), ImVec2(55, 47), r * 3 + c, accents[(r + c + 2) % 6]);
+    }
+
+    void Misc(ImDrawList* d, ImVec2 b, int& id)
+    {
+        static const Row movement[] = {
+            {"Bunny Hop", NeverloseControl::Toggle, nullptr, 0},
+            {"Air Strafe", NeverloseControl::Toggle, nullptr, 0},
+            {"Jump Bug", NeverloseControl::Toggle, nullptr, 0},
+            {"Standalone Quick Stop", NeverloseControl::Toggle, nullptr, 0},
+            {"Strafe Assist", NeverloseControl::Toggle, nullptr, 0},
+            {"Edge Jump", NeverloseControl::Toggle, nullptr, 0},
+            {"Slow Walk", NeverloseControl::Toggle, nullptr, 0},
+            {"Fast Ladder", NeverloseControl::Toggle, nullptr, 0}
+        };
+        static const Row features[] = {
+            {"Quick Switch", NeverloseControl::Toggle, nullptr, 0},
+            {"Super Toss", NeverloseControl::Toggle, nullptr, 0},
+            {"Knife Bot", NeverloseControl::Disabled, nullptr, 0},
+            {"Prevent AFK Kick", NeverloseControl::Toggle, nullptr, 0},
+            {"Hit Sound", NeverloseControl::Toggle, nullptr, 0},
+            {"Automatic Purchase", NeverloseControl::Toggle, nullptr, 0},
+            {"Automatic Grenade Release", NeverloseControl::Toggle, nullptr, 0},
+            {"Auto-Accept Matchmaking", NeverloseControl::Toggle, nullptr, 0},
+            {"Log Events", NeverloseControl::Select, "Damage Dealt, Da", 0}
+        };
+        ImVec2 a = b + ImVec2(171, 80), c = b + ImVec2(481, 80);
+        Card(d, a, ImVec2(300, 312), "MOVEMENT");
+        Card(d, c, ImVec2(254, 349), "FEATURES");
+        DrawRows(d, a, 300, movement, 8, id);
+        DrawRows(d, c, 254, features, 9, id);
+    }
+
+    void AccountPopover(ImDrawList* d, ImVec2 b)
+    {
+        const float open = Motion(ImGui::GetID("##account_open"), state.account ? 1.0f : 0.0f, 17.0f, 0.0f);
+        if (open < .002f) return;
+        const ImVec2 p = b + ImVec2(151, 380), size(218, 181);
+        const int first = d->VtxBuffer.Size;
+        d->AddRectFilled(P(p - ImVec2(4, 2)), P(p + size + ImVec2(4, 7)), C(0, 0, 0, 65), S(18));
+        d->AddRectFilled(P(p), P(p + size), C(24, 25, 34, 245), S(16));
+        d->AddRect(P(p), P(p + size), C(48, 51, 64), S(16));
+        Avatar(d, p + ImVec2(17, 16), 36.0f, 18.0f);
+        Text(d, p + ImVec2(64, 15), C(229, 231, 237), "XPTNotFound", kTextBody);
+        Text(d, p + ImVec2(64, 34), C(115, 164, 255), "Renew subscription", kTextControl);
+        const char* rows[] = { "Language", "Menu Scale", "ESP Scale", "Synchronization" };
+        for (int i = 0; i < 4; ++i)
+        {
+            float y = p.y + 66 + i * 28;
+            TextY(d, p.x + 18, y, 28, C(185, 188, 198), rows[i], kTextControl);
+            if (i < 3) Chevron(d, ImVec2(p.x + 195, y + 11), C(150, 154, 165));
+        }
+        Toggle(d, 190, p + ImVec2(169, 150));
+        for (int i = first; i < d->VtxBuffer.Size; ++i)
+        {
+            ImDrawVert& v = d->VtxBuffer[i];
+            const ImU32 a = (v.col >> IM_COL32_A_SHIFT) & 255u;
+            v.col = (v.col & 0xffffffu) | ((ImU32)(a * open) << IM_COL32_A_SHIFT);
+        }
+    }
+} // namespace
 
 // -------------------------------------------------------------------------
 // Public API
@@ -933,53 +794,6 @@ namespace menu
         style.ScrollbarSize = 10.0f;
         style.GrabMinSize = 12.0f;
 
-        ImVec4* c = style.Colors;
-        c[ImGuiCol_Text] = ImVec4(0.86f, 0.87f, 0.90f, 1.00f);
-        c[ImGuiCol_TextDisabled] = ImVec4(0.57f, 0.59f, 0.63f, 1.00f);
-        c[ImGuiCol_WindowBg] = ImVec4(0.05f, 0.06f, 0.09f, 0.98f);
-        c[ImGuiCol_ChildBg] = ImVec4(0.05f, 0.06f, 0.09f, 0.00f);
-        c[ImGuiCol_PopupBg] = ImVec4(0.078f, 0.082f, 0.110f, 0.98f);
-        c[ImGuiCol_Border] = ImVec4(0.18f, 0.19f, 0.24f, 1.00f);
-        c[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-        c[ImGuiCol_FrameBg] = ImVec4(0.094f, 0.106f, 0.145f, 1.00f);
-        c[ImGuiCol_FrameBgHovered] = ImVec4(0.13f, 0.15f, 0.21f, 1.00f);
-        c[ImGuiCol_FrameBgActive] = ImVec4(0.16f, 0.18f, 0.25f, 1.00f);
-        c[ImGuiCol_TitleBg] = ImVec4(0.05f, 0.06f, 0.09f, 1.00f);
-        c[ImGuiCol_TitleBgActive] = ImVec4(0.05f, 0.06f, 0.09f, 1.00f);
-        c[ImGuiCol_MenuBarBg] = ImVec4(0.05f, 0.06f, 0.09f, 1.00f);
-        c[ImGuiCol_ScrollbarBg] = ImVec4(0.04f, 0.05f, 0.07f, 0.60f);
-        c[ImGuiCol_ScrollbarGrab] = ImVec4(0.20f, 0.22f, 0.28f, 1.00f);
-        c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.28f, 0.31f, 0.39f, 1.00f);
-        c[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.31f, 0.43f, 0.78f, 1.00f);
-        c[ImGuiCol_CheckMark] = ImVec4(0.31f, 0.51f, 1.00f, 1.00f);
-        c[ImGuiCol_SliderGrab] = ImVec4(0.31f, 0.51f, 1.00f, 1.00f);
-        c[ImGuiCol_SliderGrabActive] = ImVec4(0.40f, 0.64f, 1.00f, 1.00f);
-        c[ImGuiCol_Button] = ImVec4(0.10f, 0.12f, 0.17f, 1.00f);
-        c[ImGuiCol_ButtonHovered] = ImVec4(0.15f, 0.18f, 0.25f, 1.00f);
-        c[ImGuiCol_ButtonActive] = ImVec4(0.18f, 0.21f, 0.29f, 1.00f);
-        c[ImGuiCol_Header] = ImVec4(0.15f, 0.18f, 0.25f, 1.00f);
-        c[ImGuiCol_HeaderHovered] = ImVec4(0.20f, 0.24f, 0.33f, 1.00f);
-        c[ImGuiCol_HeaderActive] = ImVec4(0.25f, 0.31f, 0.43f, 1.00f);
-        c[ImGuiCol_Separator] = ImVec4(0.12f, 0.13f, 0.17f, 1.00f);
-        c[ImGuiCol_SeparatorHovered] = ImVec4(0.31f, 0.51f, 1.00f, 0.60f);
-        c[ImGuiCol_SeparatorActive] = ImVec4(0.31f, 0.51f, 1.00f, 1.00f);
-        c[ImGuiCol_ResizeGrip] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-        c[ImGuiCol_ResizeGripHovered] = ImVec4(0.31f, 0.51f, 1.00f, 0.60f);
-        c[ImGuiCol_ResizeGripActive] = ImVec4(0.31f, 0.51f, 1.00f, 0.90f);
-        c[ImGuiCol_Tab] = ImVec4(0.10f, 0.12f, 0.17f, 1.00f);
-        c[ImGuiCol_TabHovered] = ImVec4(0.20f, 0.24f, 0.33f, 1.00f);
-        c[ImGuiCol_TabSelected] = ImVec4(0.25f, 0.31f, 0.43f, 1.00f);
-        c[ImGuiCol_TabSelectedOverline] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-        c[ImGuiCol_PlotLines] = ImVec4(0.31f, 0.51f, 1.00f, 1.00f);
-        c[ImGuiCol_PlotLinesHovered] = ImVec4(0.40f, 0.64f, 1.00f, 1.00f);
-        c[ImGuiCol_PlotHistogram] = ImVec4(0.31f, 0.51f, 1.00f, 1.00f);
-        c[ImGuiCol_PlotHistogramHovered] = ImVec4(0.40f, 0.64f, 1.00f, 1.00f);
-        c[ImGuiCol_TableHeaderBg] = ImVec4(0.10f, 0.12f, 0.17f, 1.00f);
-        c[ImGuiCol_TableBorderStrong] = ImVec4(0.18f, 0.19f, 0.24f, 1.00f);
-        c[ImGuiCol_TableBorderLight] = ImVec4(0.12f, 0.13f, 0.17f, 1.00f);
-        c[ImGuiCol_TextSelectedBg] = ImVec4(0.31f, 0.51f, 1.00f, 0.35f);
-        c[ImGuiCol_NavCursor] = ImVec4(0.31f, 0.51f, 1.00f, 1.00f);
-
         menu_fonts::add();
     }
 
@@ -998,7 +812,8 @@ namespace menu
         if (ImGui::Begin("##synapse_launcher", nullptr, flags))
         {
             const ImVec2 p = ImGui::GetWindowPos();
-            const bool click = Hit("##launch", p, size);
+            ImGui::SetCursorScreenPos(p);
+            const bool click = ImGui::InvisibleButton("##launch", size);
             const ImGuiID id = ImGui::GetItemID();
             const float hover = Motion(id ^ 0x51a0u, ImGui::IsItemHovered() ? 1.0f : 0.0f, 18.0f);
             ImDrawList* d = ImGui::GetWindowDrawList();
@@ -1007,34 +822,33 @@ namespace menu
             d->AddRect(p, p + size, Mix(C(40, 44, 56), C(75, 126, 255), hover), 8.0f);
             d->AddRectFilled(p + ImVec2(11.0f, size.y * 0.5f - 4.0f), p + ImVec2(19.0f, size.y * 0.5f + 4.0f),
                              C(75, 126, 255), 2.0f);
-            TextY(d, p.x + 27.0f, p.y, size.y, C(220, 223, 231), "MENU", kControl);
-            if (click)
-                *open = true;
+            d->AddText(ImGui::GetFont(), 14.0f, p + ImVec2(27.0f, size.y * 0.5f - 7.0f), C(220, 223, 231), "MENU");
+            if (click) *open = true;
         }
         ImGui::End();
         ImGui::PopStyleColor();
         ImGui::PopStyleVar(2);
     }
 
-    void render(bool* open, const ImVec2& pos, const ImVec2& size)
+    void render(bool* open, const ImVec2& origin, float scale)
     {
         if (open == nullptr || !*open)
         {
             state.open_mix = 0.0f;
-            state.scroll_drag = false;
-            state.popup_open = false;
-            state.popup_target = nullptr;
-            state.popup_items = nullptr;
-            state.popup_count = 0;
+            state.account = false;
+            state.popup.open = false;
+            state.popup_rect_min = ImVec2(0, 0);
+            state.popup_rect_max = ImVec2(0, 0);
             return;
         }
-        if (size.x < 240.0f || size.y < 220.0f)
-            return;
+        if (scale <= 0.0f) return;
+
+        view.origin = origin;
+        view.scale = scale;
 
         ImGuiIO& io = ImGui::GetIO();
         state.open_mix = ImLerp(state.open_mix, 1.0f, 1.0f - std::exp(-18.0f * io.DeltaTime));
-        if (state.open_mix > 0.999f)
-            state.open_mix = 1.0f;
+        if (state.open_mix > 0.999f) state.open_mix = 1.0f;
 
         ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
         ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
@@ -1042,52 +856,82 @@ namespace menu
         ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
 
-        const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                                       ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
-                                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
-                                       ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing |
-                                       ImGuiWindowFlags_NoBringToFrontOnFocus;
+        ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+                                 ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
+                                 ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing |
+                                 ImGuiWindowFlags_NoBringToFrontOnFocus;
+        if (state.open_mix < 0.95f) flags |= ImGuiWindowFlags_NoInputs;
 
-        if (ImGui::Begin("##synapse_menu", nullptr, flags))
+        if (ImGui::Begin("Neverlose Menu", nullptr, flags))
         {
             ImDrawList* d = ImGui::GetWindowDrawList();
-            const int frame_first = d->VtxBuffer.Size;
-            const ImVec2 base = pos;
+            const ImVec2 b(0.0f, 0.0f);
 
-            // Dim the scene behind the menu (replaces the Windows D3D blur).
+            // Blur replacement: dim the scene under the menu.
             d->AddRectFilled(ImVec2(0.0f, 0.0f), io.DisplaySize, C(9, 11, 18, 110));
 
-            // Soft shadow around the shell.
-            d->AddRectFilled(base - ImVec2(2.0f, 2.0f), base + size + ImVec2(2.0f, 4.0f), C(0, 0, 0, 60), 16.0f);
-            d->AddRectFilled(base - ImVec2(6.0f, 5.0f), base + size + ImVec2(6.0f, 9.0f), C(0, 0, 0, 38), 19.0f);
+            const int shell_first = d->VtxBuffer.Size;
+            d->AddRectFilled(P(b), P(b + kShell), C(13, 15, 22, 222), S(14));
+            Sidebar(d, b);
+            Toolbar(d, b, open);
 
-            // Shell.
-            d->AddRectFilled(base, base + size, C(13, 15, 22, 247), 14.0f);
-
-            if (size.y > size.x)
+            const int content_first = d->VtxBuffer.Size;
+            int id = 0;
+            ImGui::PushID(static_cast<int>(state.page));
+            switch (state.page)
             {
-                DrawTopBar(d, base, size, open);
-                DrawContent(d, base + ImVec2(8.0f, 97.0f),
-                            ImVec2(size.x - 16.0f, size.y - 105.0f), true);
+            case NeverlosePage::Rage: Rage(d, b, id); break;
+            case NeverlosePage::Legit: Legit(d, b, id); break;
+            case NeverlosePage::Players: Players(d, b, id); break;
+            case NeverlosePage::World: World(d, b, id); break;
+            case NeverlosePage::Inventory: Inventory(d, b, id); break;
+            case NeverlosePage::Miscellaneous: Misc(d, b, id); break;
             }
-            else
+            ImGui::PopID();
+
+            state.page_mix = ImLerp(state.page_mix, 1.0f, 1.0f - std::exp(-15.0f * io.DeltaTime));
+            const float pe = 1.0f - std::pow(1.0f - state.page_mix, 3.0f);
+            for (int i = content_first; i < d->VtxBuffer.Size; ++i)
             {
-                DrawSidebar(d, base, size, open);
-                DrawToolbar(d, base, size, open);
-                DrawContent(d, base + ImVec2(kSidebarW + 8.0f, kToolbarH + 8.0f),
-                            ImVec2(size.x - kSidebarW - 16.0f, size.y - kToolbarH - 16.0f), false);
+                ImDrawVert& v = d->VtxBuffer[i];
+                v.pos.x += S(9.0f) * (1.0f - pe);
+                const ImU32 a = (v.col >> IM_COL32_A_SHIFT) & 255u;
+                v.col = (v.col & 0xffffffu) | ((ImU32)(a * pe) << IM_COL32_A_SHIFT);
             }
 
-            // Keep the outer border crisp above the sidebar/toolbar fills.
-            d->AddRect(base, base + size, C(31, 34, 44), 14.0f);
-
-            PopupLayer(d, io.DisplaySize);
+            AccountPopover(d, b);
+            PopupLayer(d);
 
             if (state.open_mix < 0.999f)
-                FadeVertices(d, frame_first, state.open_mix);
+            {
+                const float e = 1.0f - std::pow(1.0f - state.open_mix, 4.0f);
+                const float sc = ImLerp(.92f, 1.0f, e);
+                const ImVec2 pivot = P(kCanvas * 0.5f);
+                for (int i = shell_first; i < d->VtxBuffer.Size; ++i)
+                {
+                    ImDrawVert& v = d->VtxBuffer[i];
+                    v.pos = pivot + (v.pos - pivot) * sc + ImVec2(0.0f, S(16.0f) * (1.0f - e));
+                    const ImU32 a = (v.col >> IM_COL32_A_SHIFT) & 255u;
+                    v.col = (v.col & 0xffffffu) | ((ImU32)(a * e) << IM_COL32_A_SHIFT);
+                }
+            }
+
+            // iOS has no Escape: a tap on the dim area closes the menu.
+            if (ImGui::IsMouseReleased(0) && state.open_mix > 0.95f)
+            {
+                const ImVec2 mp = io.MousePos;
+                const ImVec2 mc((mp.x - origin.x) / scale, (mp.y - origin.y) / scale);
+                const bool in_shell = mc.x >= 0.0f && mc.y >= 0.0f && mc.x <= kShell.x && mc.y <= kShell.y;
+                const bool in_popup = state.popup_rect_max.x > state.popup_rect_min.x &&
+                                      mc.x >= state.popup_rect_min.x && mc.y >= state.popup_rect_min.y &&
+                                      mc.x <= state.popup_rect_max.x && mc.y <= state.popup_rect_max.y;
+                if (!in_shell && !in_popup) *open = false;
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) *open = false;
         }
         ImGui::End();
         ImGui::PopStyleColor();
         ImGui::PopStyleVar(2);
     }
-}
+} // namespace menu

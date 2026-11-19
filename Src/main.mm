@@ -127,11 +127,18 @@ static double g_lastFrame = 0.0;
     const float margin = 10.0f;
 
     if (g_open) {
-        const ImVec2 menuPos(margin + (float)safe.left, margin + (float)safe.top);
-        const ImVec2 menuSize(view.bounds.size.width - (float)safe.left - (float)safe.right - margin * 2.0f,
-                              view.bounds.size.height - (float)safe.top - (float)safe.bottom - margin * 2.0f);
+        // The nlka canvas is 750x756: scale it uniformly to fit the safe area.
+        const float avail_w = view.bounds.size.width - (float)safe.left - (float)safe.right - margin * 2.0f;
+        const float avail_h = view.bounds.size.height - (float)safe.top - (float)safe.bottom - margin * 2.0f;
+        float scale = avail_w / 750.0f;
+        const float scale_y = avail_h / 756.0f;
+        if (scale_y < scale) scale = scale_y;
+        if (scale > 1.0f) scale = 1.0f;
 
-        menu::render(&g_open, menuPos, menuSize);
+        const ImVec2 menuOrigin((float)safe.left + margin + (avail_w - 750.0f * scale) * 0.5f,
+                                (float)safe.top + margin + (avail_h - 756.0f * scale) * 0.5f);
+
+        menu::render(&g_open, menuOrigin, scale);
 
         g_btnRect = CGRectZero;
         // Full-screen hit area while open so ImGui popups (select / color picker)

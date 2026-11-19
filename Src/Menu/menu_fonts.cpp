@@ -7098,7 +7098,7 @@ namespace menu_fonts
         body.PixelSnapH = true;
 
         // Primary UI face.
-        g_regular = io.Fonts->AddFontFromMemoryCompressedBase85TTF(SstMedium_compressed_data_base85, 14.0f, &body);
+        g_regular = io.Fonts->AddFontFromMemoryCompressedBase85TTF(SstMedium_compressed_data_base85, 15.0f, &body);
         if (g_regular == nullptr)
             g_regular = io.Fonts->AddFontDefault();
 
@@ -7109,13 +7109,13 @@ namespace menu_fonts
         icons.MergeMode = true;
         icons.OversampleH = 2;
         icons.PixelSnapH = true;
-        io.Fonts->AddFontFromMemoryCompressedBase85TTF(FaSolid_compressed_data_base85, 12.0f, &icons);
+        io.Fonts->AddFontFromMemoryCompressedBase85TTF(FaSolid_compressed_data_base85, 14.0f, &icons);
 
         // Bold face used for titles/branding.
         ImFontConfig bold;
         bold.OversampleH = 2;
         bold.PixelSnapH = true;
-        g_strong = io.Fonts->AddFontFromMemoryCompressedBase85TTF(SstBold_compressed_data_base85, 15.0f, &bold);
+        g_strong = io.Fonts->AddFontFromMemoryCompressedBase85TTF(SstBold_compressed_data_base85, 16.0f, &bold);
         if (g_strong == nullptr)
             g_strong = g_regular;
     }
