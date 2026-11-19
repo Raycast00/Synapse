@@ -17,15 +17,14 @@
 #include "Memory/KittyInclude.hpp"
 
 static bool   g_open = false;
-static CGRect g_btnRect = CGRectZero, g_menuRect = CGRectZero;
+static CGRect g_btnRect, g_menuRect;
+static bool   g_checkbox = false;
 
 // touch state: клик уходит в imgui через кадр после hover
 static ImVec2 g_tPos = ImVec2(-FLT_MAX, -FLT_MAX);
 static int    g_tPhase = 0;      // 0 idle, 1 hover frame, 2 send down, 3 held
 static bool   g_tRelease = false;
 static bool   g_tLeave = false;
-
-static double g_lastFrame = 0.0;
 
 @interface OverlayWindow : UIWindow @end
 @implementation OverlayWindow
@@ -59,14 +58,28 @@ static double g_lastFrame = 0.0;
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
 
-    ImGuiIO &io = ImGui::GetIO();
-    io.IniFilename = nullptr;
-    io.LogFilename = nullptr;
+    // Styling
+    ImGui::GetIO().IniFilename = nullptr;
 
-    // Встроенные шрифты и стиль Neverlose-меню.
-    menu::init();
+    ImGui::GetIO().FontGlobalScale = 1.f;
+    ImGui::GetStyle().ScaleAllSizes(1.35f);
+
+    // Rounding shit
+    ImGui::GetStyle().FrameRounding = 3.0f;
+    ImGui::StyleColorsLight();
+    ImGui::GetStyle().WindowRounding = 5.5f;
+    ImGui::GetStyle().ScrollbarSize = 14.f;
+
+    ImGui::GetStyle().Colors[ImGuiCol_CheckMark] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
+    ImGui::GetStyle().Colors[ImGuiCol_TabSelectedOverline] = ImVec4(0, 0, 0, 0);
+    ImGui::GetStyle().Colors[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0, 0, 0, 0);
+
+    ImGui::GetStyle().TabBarBorderSize = 0.0f;
+
+    ImVec4 bgColor = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+    ImGui::GetStyle().Colors[ImGuiCol_WindowBg] = ImVec4(0.97f, 0.97f, 0.97f, 0.95f); 
+
     ImGui_ImplMetal_Init(dev);
-
     return self;
 }
 
