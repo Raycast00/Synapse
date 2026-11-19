@@ -46,6 +46,10 @@ namespace
         constexpr float  DefaultPitchLimit = 80.f;
         constexpr float  OverrideYawDegPerFrame = 12.f;
         constexpr double OverrideHoldSec        = 0.25;
+
+        // Silent aim: PlayerController._armsController и ArmsController._cameraTransform, из dump.cs
+        constexpr uintptr_t PC_ArmsController    = 0x60;
+        constexpr uintptr_t Arms_CameraTransform = 0x178;
     }
 
     struct Api
@@ -57,6 +61,7 @@ namespace
         void *mW2S{}, *mCamMain{}, *mScreenW{}, *mScreenH{}, *mGetHeadBone{};
         void *mTeam{}, *mIsAlive{}, *mHealth{}, *mLookXLimit{};
         void *kSMR{}, *mGetBones{};
+        void *kArms{}, *mShoot{}, *mCanShoot{};
     } A;
 
     bool ResolveApi()
@@ -72,6 +77,10 @@ namespace
         A.kPlayer     = il::Class("Photon.Realtime", "Player", "PhotonRealtime");
         A.kSMR        = il::Class("UnityEngine", "SkinnedMeshRenderer", core);
         A.mGetBones   = il::Method(A.kSMR, "get_bones", 0);
+
+        A.kArms     = il::Class("", "ArmsController", "Assembly-CSharp");
+        A.mShoot    = il::Method(A.kArms, "Shoot", 0);
+        A.mCanShoot = il::Method(A.kArms, "get_CanShoot", 0);
 
         void* kComponent  = il::Class("UnityEngine", "Component", core);
         void* kGameObject = il::Class("UnityEngine", "GameObject", core);
@@ -100,6 +109,7 @@ namespace
         need(A.mGetCompInChildren, "GetComponentInChildren/2"); need(A.mGetPos, "get_position");
         need(A.mGetFwd, "get_forward"); need(A.mRotate4, "Transform.Rotate/4"); need(A.mW2S, "WorldToScreenPoint");
         need(A.mScreenW, "get_width"); need(A.mScreenH, "get_height");
+        need(A.kArms, "ArmsController"); need(A.mShoot, "ArmsController.Shoot"); need(A.mCanShoot, "ArmsController.get_CanShoot");
 
         A.ready = A.missing.empty();
         return A.ready;
@@ -177,6 +187,8 @@ namespace
 
         double overrideUntil = -1.0;
         float  lastCmdY = 0.f;
+
+        uintptr_t localPc = 0; // PlayerController локального игрока — нужен для доступа к ArmsController
     } W;
 
     uintptr_t PickHeadBone(uintptr_t body)
@@ -202,6 +214,7 @@ namespace
     {
         W.cands.clear();
         W.camera = W.lock = W.body = 0; W.haveLocal = false; W.localTeam.clear();
+        W.localPc = 0;
         W.nPc = W.nLocal = W.nNoSkel = 0;
 
         for (uintptr_t pc : il::FindObjectsOfType(A.kPC)) {
@@ -213,6 +226,7 @@ namespace
 
             if (il::Read<uint8_t>(player + Cfg::Player_IsLocal)) {
                 W.nLocal++;
+                W.localPc = pc;
                 uintptr_t cam = il::Read<uintptr_t>(pc + Cfg::PC_MainCamera);
                 if (il::ValidPtr(cam)) W.camera = cam;
                 uintptr_t lk = il::Read<uintptr_t>(pc + Cfg::PC_PlayerLock);
@@ -339,6 +353,85 @@ namespace
     static float s_lastHeadY = 0.f;
     static bool  s_haveLastHeadY = false;
 
+    // Сайлент: пишем угол, стреляем прямым вызовом Shoot(), восстанавливаем — синхронно, без хуков.
+    // Крутим bodyTr (yaw) + саму камеру cam/arms-камеру напрямую (pitch+yaw), потому что PlayerLock.rotationX
+    // сам по себе — просто число, которое какой-то другой скрипт применяет к Transform камеры в своём
+    // Update/LateUpdate; синхронный вызов Shoot() может не дождаться этого применения.
+    bool SilentFire(void* camTr, void* bodyTr, const V3& eye, const Ang& cur,
+                     const V3& targetPos, char* statusOut, size_t statusCap)
+    {
+        if (!A.kArms || !A.mShoot || !A.mCanShoot) {
+            std::snprintf(statusOut, statusCap, "no Shoot API"); return false;
+        }
+        if (!il::ValidPtr(W.localPc)) { std::snprintf(statusOut, statusCap, "no local pc"); return false; }
+
+        uintptr_t arms = il::Read<uintptr_t>(W.localPc + Cfg::PC_ArmsController);
+        if (!il::ValidPtr(arms)) { std::snprintf(statusOut, statusCap, "no arms"); return false; }
+
+        bool canShoot = false;
+        if (!CallBool(A.mCanShoot, (void*)arms, canShoot) || !canShoot) {
+            std::snprintf(statusOut, statusCap, "CanShoot=false"); return false;
+        }
+
+        V3 dir{ targetPos.x - eye.x, targetPos.y - eye.y, targetPos.z - eye.z };
+        Ang des{};
+        if (!FromDir(dir, des)) { std::snprintf(statusOut, statusCap, "bad dir"); return false; }
+
+        float eY = Wrap(des.yaw - cur.yaw);
+        float eP = des.pitch - cur.pitch;
+        if (!std::isfinite(eY) || !std::isfinite(eP)) {
+            std::snprintf(statusOut, statusCap, "non-finite delta"); return false;
+        }
+
+        float origFp = il::Read<float>(W.lock + Cfg::PL_RotationX);
+        if (!std::isfinite(origFp)) { std::snprintf(statusOut, statusCap, "bad rotationX"); return false; }
+
+        float limit = Cfg::DefaultPitchLimit;
+        CallFloat(A.mLookXLimit, (void*)W.lock, limit);
+        float newFp = std::clamp(origFp - eP, -limit, limit);
+
+        // ArmsController._cameraTransform (0x178, из дампа) — не подтверждено, что именно её читает
+        // FireRay, но она реально существует в этом билде; крутим на всякий случай тоже.
+        void* armsCamTr = nullptr;
+        {
+            uintptr_t armsCam = il::Read<uintptr_t>(arms + Cfg::Arms_CameraTransform);
+            if (il::ValidPtr(armsCam)) armsCamTr = (void*)armsCam;
+        }
+
+        auto rotateWorldY = [&](void* tr, float deg) {
+            if (!tr) return;
+            float x = 0.f, y = deg, z = 0.f; int space = 0; // Space.World
+            void* a[4] = { &x, &y, &z, &space };
+            il::Invoke(A.mRotate4, tr, a);
+        };
+        auto rotateLocalX = [&](void* tr, float deg) {
+            if (!tr) return;
+            float x = deg, y = 0.f, z = 0.f; int space = 1; // Space.Self
+            void* a[4] = { &x, &y, &z, &space };
+            il::Invoke(A.mRotate4, tr, a);
+        };
+
+        // --- снап ---
+        rotateWorldY(bodyTr, eY);
+        rotateWorldY(camTr, eY);
+        rotateLocalX(camTr, -eP);
+        if (armsCamTr) { rotateWorldY(armsCamTr, eY); rotateLocalX(armsCamTr, -eP); }
+        il::Write<float>(W.lock + Cfg::PL_RotationX, newFp);
+
+        // --- выстрел прямым вызовом, синхронно, без ожидания реального инпута ---
+        il::Invoke(A.mShoot, (void*)arms, nullptr);
+
+        // --- возврат как было ---
+        rotateWorldY(bodyTr, -eY);
+        rotateWorldY(camTr, -eY);
+        rotateLocalX(camTr, eP);
+        if (armsCamTr) { rotateWorldY(armsCamTr, -eY); rotateLocalX(armsCamTr, eP); }
+        il::Write<float>(W.lock + Cfg::PL_RotationX, origFp);
+
+        std::snprintf(statusOut, statusCap, "fired eY=%.1f eP=%.1f armsCam=%d", eY, eP, armsCamTr != nullptr);
+        return true;
+    }
+
     void AimbotFrame(ImDrawList* dl, ImVec2 center)
     {
         char st[380];
@@ -453,7 +546,13 @@ namespace
 
         float eY = 0.f, eP = 0.f, cmdY = 0.f;
         bool wrote = false;
-        if (best && !overriding) {
+        bool silentActive = aim::silent && aim::aimbot;
+        char silentStatus[96] = "idle";
+
+        if (silentActive) {
+            if (best) wrote = SilentFire(camTr, bodyTr, eye, cur, bestPos, silentStatus, sizeof silentStatus);
+            else      std::snprintf(silentStatus, sizeof silentStatus, "no target");
+        } else if (best && !overriding) {
             Ang des{};
             V3 dir{ bestPos.x - eye.x, bestPos.y - eye.y, bestPos.z - eye.z };
             if (FromDir(dir, des)) {
@@ -507,13 +606,14 @@ namespace
 
         int bestMask = best ? il::Read<int>(best->pc + Cfg::PC_HiddenMask) : -1;
         std::snprintf(st, sizeof st,
-            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d wt=%d | eY=%.1f eP=%.1f %s | headSrc=%s mask=0x%X headY=%.2f dY=%+.2f",
+            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d wt=%d | eY=%.1f eP=%.1f %s | headSrc=%s mask=0x%X headY=%.2f dY=%+.2f | silent=%s",
             W.nPc, (int)W.cands.size(), inFov, best ? 1 : 0, (int)(W.lockedPc != 0),
             overriding ? 1 : 0,
             aim::aim_through_walls ? 1 : 0,
             eY, eP,
             overriding ? "OVERRIDE" : (wrote ? "writing" : "idle"),
-            srcName, bestMask, best ? bestPos.y : 0.f, headYDelta);
+            srcName, bestMask, best ? bestPos.y : 0.f, headYDelta,
+            silentActive ? silentStatus : "off");
     }
 }
 

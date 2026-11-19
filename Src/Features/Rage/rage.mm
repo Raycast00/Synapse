@@ -3,7 +3,6 @@
 #include "il2cpp/il2cpp.h"
 #include <unordered_map>
 #include <vector>
-#include <cmath>
 #include "imgui.h"
 #include <cstdio>
 
@@ -67,20 +66,6 @@ namespace off {
 
     constexpr uintptr_t gc_FriendlyFire = 0x20;   // private bool _friendlyFire
     constexpr uintptr_t gc_RoundsToWin  = 0x94;   // <RoundsToWin>k__BackingField
-
-    // ============================================================
-    // INSTANT RESPAWN
-    // pc_IsDeath / pc_IsRagdolling взяты из aim.mm (IsDead()).
-    // aimbot корректно их читает -> offset'ы рабочие.
-    // ============================================================
-    constexpr uintptr_t pc_IsDeath      = 0xA8;   // PlayerController._isDeath
-    constexpr uintptr_t pc_IsRagdolling = 0x49;   // PlayerController._isRagdolling
-
-    // FIXME: нужен ТОЛЬКО для fallback-пути, если Respawn() метода нет в игре.
-    // Если у тебя работал auto-kill — это тот же offset. Впиши.
-    // 0 = fallback без HP-восстановления (используется только Respawn()).
-    constexpr uintptr_t pc_Health  = 0x000;
-    constexpr float     respawn_hp = 100.f;       // FIXME: подставь MaxHealth игры
 }
 
 struct Orig {
@@ -206,89 +191,27 @@ static void applyNoFallDamage()
     if (!ok(pc)) return;
     uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement);
     if (!ok(mv)) return;
-
+    
     Write<float>(mv + 0xB8, 0.0f);
     Write<float>(mv + 0xB4, 0.0f);
 }
 
-// ============================================================
-// INSTANT RESPAWN
-// ============================================================
-
-// Ищем метод Respawn/Spawn/ResetPlayer на PlayerController.
-// argc=0 — самый распространённый и безопасный для Invoke
-// (не надо угадывать типы аргументов).
-// Резолвится ОДИН раз, кэшируется на всё время работы.
-// nullptr = метода нет в игре -> используется fallback через сброс флагов.
-static void* getRespawnMethod()
-{
-    static void* m = (void*)-1;
-    if (m != (void*)-1) return m;
-    m = nullptr;
-    void* k = IL2CPP::Class("", "PlayerController", "Assembly-CSharp");
-    if (!k) return m;
-
-    for (const char* name : { "Respawn", "RespawnPlayer", "Spawn",
-                               "SpawnPlayer", "ResetPlayer", "RequestRespawn" }) {
-        m = IL2CPP::Method(k, name, 0);
-        if (m) return m;
-    }
-    return m;
-}
-
-static void applyInstantRespawn()
-{
-    uintptr_t pc = localPlayerController();
-    if (!ok(pc)) return;
-
-    bool dead = Read<uint8_t>(pc + off::pc_IsDeath) != 0
-             || Read<uint8_t>(pc + off::pc_IsRagdolling) != 0;
-    if (!dead) return;
-
-    // Кулдаун 0.2с: не спамим Respawn() (это может быть RPC) и не упираемся
-    // в серверные rate-limit'ы. Реальная задержка реакции:
-    // ~0.25с (кэш localPlayerController) + 0.2с = ~0.45с max.
-    static double lastCall = 0.0;
-    double now = ImGui::GetTime();
-    if (now - lastCall < 0.2) return;
-    lastCall = now;
-
-    static void* respawnM = getRespawnMethod();
-    if (respawnM) {
-        IL2CPP::Invoke(respawnM, (void*)pc, nullptr);
-        return;
-    }
-
-    // Fallback: ручной сброс флагов смерти.
-    // Работает если Update() PlayerController сам реинициализирует HP
-    // при переходе _isDeath: true -> false. Если нет — нужен pc_Health.
-    Write<uint8_t>(pc + off::pc_IsDeath, 0);
-    Write<uint8_t>(pc + off::pc_IsRagdolling, 0);
-    if (off::pc_Health != 0) {
-        Write<float>(pc + off::pc_Health, off::respawn_hp);
-    }
-}
-
-// ============================================================
-
 static void drawStatus(bool ilReady)
 {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
-    char l1[200], l2[200], l3[200];
+    char l1[200], l2[200];
 
     if (!ilReady) {
         std::snprintf(l1, sizeof l1, "RAGE: IL2CPP not ready");
         l2[0] = 0;
-        l3[0] = 0;
     } else {
         uintptr_t pc   = localPlayerController();
         uintptr_t arms = ok(pc) ? Read<uintptr_t>(pc + off::pcArms) : 0;
         uintptr_t mv   = ok(pc) ? Read<uintptr_t>(pc + off::pcMovement) : 0;
 
         std::snprintf(l1, sizeof l1,
-            "RAGE tog: ammo=%d rate=%d mbt=%d rec=%d spr=%d rs=%d | pc=%d arms=%d mv=%d wpn=%d cam=%d",
+            "RAGE tog: ammo=%d rate=%d mbt=%d rec=%d spr=%d | pc=%d arms=%d mv=%d wpn=%d cam=%d",
             rage::infinity_ammo, rage::rapid_fire, rage::MBT, rage::no_recoil, rage::no_spread,
-            rage::instant_respawn,
             ok(pc), ok(arms), ok(mv), (int)g_weapons.size(), ok(fpsCamera()));
 
         std::snprintf(l2, sizeof l2, "RAGE val: mag=%d res=%d timeFired=%.2f freezing=%d grounded=%d",
@@ -297,19 +220,7 @@ static void drawStatus(bool ilReady)
             ok(arms) ? Read<float>(arms + off::arms_TimeFired) : -1.f,
             ok(mv) ? (int)Read<uint8_t>(mv + off::pm_IsFreezing) : -1,
             ok(mv) ? (int)Read<uint8_t>(mv + off::pm_IsGrounded) : -1);
-
-        // Диагностика instant_respawn:
-        //   dead=1 rag=1  -> флаги смерти читаются (фича видит твой труп)
-        //   method=1      -> Respawn() метод найден, работает через него
-        //   method=0      -> fallback через сброс флагов (нужен pc_Health)
-        std::snprintf(l3, sizeof l3, "RAGE rs: dead=%d rag=%d method=%d",
-            ok(pc) ? (int)Read<uint8_t>(pc + off::pc_IsDeath) : -1,
-            ok(pc) ? (int)Read<uint8_t>(pc + off::pc_IsRagdolling) : -1,
-            getRespawnMethod() ? 1 : 0);
     }
-    // Y=64: диагностика rs; Y=80: tog; Y=96: val
-    dl->AddText(ImVec2(11, 65), IM_COL32(0, 0, 0, 255), l3);
-    dl->AddText(ImVec2(10, 64), IM_COL32(0, 255, 255, 255), l3);
     dl->AddText(ImVec2(11, 81), IM_COL32(0, 0, 0, 255), l1);
     dl->AddText(ImVec2(10, 80), IM_COL32(0, 255, 255, 255), l1);
     if (l2[0]) {
@@ -339,10 +250,9 @@ void rage::run()
         }
     }
 
-    if (rage::no_recoil)       applyCameraRecoil();
-    if (rage::infinity_ammo)   applyInfinityAmmo();
-    if (rage::rapid_fire)      applyRapidFire();
-    if (rage::MBT)             applyMBT();
-    if (rage::no_fall_damage)  applyNoFallDamage();
-    if (rage::instant_respawn) applyInstantRespawn();
+    if (rage::no_recoil) applyCameraRecoil();
+    if (rage::infinity_ammo) applyInfinityAmmo();
+    if (rage::rapid_fire) applyRapidFire();
+    if (rage::MBT)           applyMBT();
+    if (rage::no_fall_damage) applyNoFallDamage();
 }
