@@ -1,6 +1,5 @@
 #import <UIKit/UIKit.h>
 #import <MetalKit/MetalKit.h>
-#import <QuartzCore/QuartzCore.h>
 #include <float.h>
 #include "imgui.h"
 #include "imgui_impl_metal.h"
@@ -9,7 +8,6 @@
 #include "Features/Aim/aim.h"
 #include "Features/Rage/rage.h"
 #include "Features/Misc/misc.h"
-
 #include "Settings/settings.h"
 
 #include "Memory/KittyInclude.hpp"
@@ -137,6 +135,7 @@ static bool   g_tLeave = false;
                            ImGui::GetWindowSize().x, ImGui::GetWindowSize().y);
     ImGui::End();
 
+    // Само меню
     if (g_open) {
         ImGui::SetNextWindowPos(ImVec2(120, 60), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(470, 300), ImGuiCond_FirstUseEver);
@@ -270,10 +269,6 @@ static bool   g_tLeave = false;
                 ImGui::Checkbox("No Recoil", &rage::no_recoil);
                 ImGui::Checkbox("No Spread", &rage::no_spread);
 
-                ImGui::SeparatorText("Game");
-
-                ImGui::Checkbox("Auto Kill", &rage::auto_kill);
-
                 ImGui::EndTabItem();
             }
 
@@ -300,16 +295,8 @@ static bool   g_tLeave = false;
         if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
             g_menuRect = view.bounds;
     } else {
-        const ImVec2 launchPos(margin + (float)safe.left, margin + (float)safe.top);
-        const ImVec2 launchSize(84.0f, 34.0f);
-
-        menu::launcher(&g_open, launchPos, launchSize);
-
-        g_btnRect = CGRectMake(launchPos.x, launchPos.y, launchSize.x, launchSize.y);
         g_menuRect = CGRectZero;
     }
-    if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
-        g_menuRect = view.bounds;
 
     ImGui::Render();
     id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
