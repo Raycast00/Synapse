@@ -5,8 +5,6 @@
 #include "imgui.h"
 #include "imgui_impl_metal.h"
 
-#include "Menu/menu.h"
-
 #include "Features/Visuals/visuals.h"
 #include "Features/Aim/aim.h"
 #include "Features/Rage/rage.h"
