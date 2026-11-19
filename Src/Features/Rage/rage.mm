@@ -185,107 +185,6 @@ static void applyMBT()
     Write<uint8_t>(mv + off::pm_IsFreezing, 0);
 }
 
-namespace {
-    struct Vec3 { float x, y, z; };
-
-    Vec3 g_lastAlivePos = {0.f, 0.f, 0.f};
-    bool g_hasLastAlivePos = false;
-    bool g_pendingTeleport = false;
-    bool g_triggeredForCurrentDeath = false;
-
-    // RVA из дампа:
-    // PlayerController.get_IsDeath  -> 0x1634EC0
-    // PlayerController.MarkRespawned -> 0x163B26C
-    // PlayerMovement.Teleport      -> 0x155CAE8
-    constexpr uintptr_t RVA_PC_get_IsDeath     = 0x1634EC0;
-    constexpr uintptr_t RVA_PC_MarkRespawned = 0x163B26C;
-    constexpr uintptr_t RVA_PM_Teleport      = 0x155CAE8;
-
-    // Поля из дампа:
-    constexpr uintptr_t OFF_PC_movementController = 0x40;
-    constexpr uintptr_t OFF_PC_isDeath            = 0xA8;
-
-    Vec3 getMovementPos(uintptr_t movement) {
-        // Если у тебя уже есть хелпер получения позиции Transform по компоненту/объекту — используй его.
-        // Fallback через UnityEngine.Component.get_transform + Transform.get_position:
-        using get_transform_t = uintptr_t (*)(uintptr_t);
-        using get_position_t  = void (*)(uintptr_t, Vec3*);
-
-        static auto fn_get_transform = reinterpret_cast<get_transform_t>(
-            il2cpp_resolve_icall("UnityEngine.Component::get_transform"));
-        static auto fn_get_position = reinterpret_cast<get_position_t>(
-            il2cpp_resolve_icall("UnityEngine.Transform::get_position_Injected")); // или get_position
-
-        Vec3 out = {0.f, 0.f, 0.f};
-        if (!ok(movement) || !fn_get_transform || !fn_get_position) return out;
-
-        uintptr_t tr = fn_get_transform(movement);
-        if (ok(tr)) {
-            fn_get_position(tr, &out);
-        }
-        return out;
-    }
-}
-
-static void applyInstantRespawn()
-{
-    if (!rage::instant_respawn) {
-        g_pendingTeleport = false;
-        g_triggeredForCurrentDeath = false;
-        return;
-    }
-
-    static double nextTick = 0.0;
-    double now = ImGui::GetTime();
-    if (now < nextTick) return;
-    nextTick = now + 0.1;
-
-    uintptr_t pc = localPlayerController();
-    if (!ok(pc)) return;
-
-    uintptr_t movement = 0;
-    if (!read_field(pc, OFF_PC_movementController, movement) || !ok(movement)) return;
-
-    bool isDead = false;
-    using fn_get_is_death_t = bool (*)(uintptr_t);
-    auto fn_get_is_death = reinterpret_cast<fn_get_is_death_t>(gameAssemblyBase() + RVA_PC_get_IsDeath);
-    if (fn_get_is_death) {
-        isDead = fn_get_is_death(pc);
-    } else {
-        read_field(pc, OFF_PC_isDeath, isDead);
-    }
-
-    if (!isDead) {
-        // Игрок жив — обновляем безопасную позицию
-        g_lastAlivePos = getMovementPos(movement);
-        g_hasLastAlivePos = true;
-        g_triggeredForCurrentDeath = false;
-
-        // Если респавн только что прошёл и ждём возврата в точку смерти
-        if (g_pendingTeleport && g_hasLastAlivePos) {
-            using fn_teleport_t = void (*)(uintptr_t, Vec3);
-            auto fn_teleport = reinterpret_cast<fn_teleport_t>(gameAssemblyBase() + RVA_PM_Teleport);
-            if (fn_teleport) {
-                fn_teleport(movement, g_lastAlivePos);
-            }
-            g_pendingTeleport = false;
-        }
-        return;
-    }
-
-    // Игрок мёртв
-    if (!g_triggeredForCurrentDeath && g_hasLastAlivePos) {
-        g_triggeredForCurrentDeath = true;
-        g_pendingTeleport = true;
-
-        using fn_mark_respawned_t = void (*)(uintptr_t);
-        auto fn_mark_respawned = reinterpret_cast<fn_mark_respawned_t>(gameAssemblyBase() + RVA_PC_MarkRespawned);
-        if (fn_mark_respawned) {
-            fn_mark_respawned(pc);
-        }
-    }
-}
-
 static void applyNoFallDamage()
 {
     uintptr_t pc = localPlayerController();
@@ -355,6 +254,5 @@ void rage::run()
     if (rage::infinity_ammo) applyInfinityAmmo();
     if (rage::rapid_fire) applyRapidFire();
     if (rage::MBT)           applyMBT();
-    if (rage::instant_respawn) applyInstantRespawn();
     if (rage::no_fall_damage) applyNoFallDamage();
 }

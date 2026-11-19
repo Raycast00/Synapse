@@ -254,12 +254,6 @@ static bool   g_tLeave = false;
                 ImGui::Checkbox("Move Before Timer", &rage::MBT);
                 ImGui::Checkbox("Instant Respawn", &rage::instant_respawn);
 
-                ImGui::Checkbox("No Clip", &rage::flight);
-                if (rage::flight)
-                {
-                    ImGui::SliderFloat("Speed", &rage::flight_speed, 1.f, 20.f, "%.1f");
-                }
-
                 ImGui::Checkbox("Wallbang", &rage::wallbang);
                 ImGui::Checkbox("No Fall Damage", &rage::no_fall_damage);
 
