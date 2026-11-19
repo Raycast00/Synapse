@@ -1,21 +1,32 @@
 #import <UIKit/UIKit.h>
 #import <MetalKit/MetalKit.h>
+#import <QuartzCore/QuartzCore.h>
 #include <float.h>
 #include "imgui.h"
 #include "imgui_impl_metal.h"
 
+<<<<<<< HEAD
+=======
+#include "Menu/content.h"
+#include "Menu/fonts.h"
+#include "Menu/launcher.h"
+>>>>>>> 1324a15d57503dc315a2e04edf9268260ad9ac15
 #include "Menu/menu.h"
 
 #include "Features/Visuals/visuals.h"
 #include "Features/Aim/aim.h"
 #include "Features/Rage/rage.h"
 #include "Features/Misc/misc.h"
-#include "Settings/settings.h"
 
 #include "Memory/KittyInclude.hpp"
 
+<<<<<<< HEAD
 static bool   g_open = false;
 static CGRect g_btnRect, g_menuRect;
+=======
+static nl::Menu g_menu;
+static CGRect  g_btnRect = CGRectZero, g_menuRect = CGRectZero;
+>>>>>>> 1324a15d57503dc315a2e04edf9268260ad9ac15
 
 // touch state: клик уходит в imgui через кадр после hover
 static ImVec2 g_tPos = ImVec2(-FLT_MAX, -FLT_MAX);
@@ -23,16 +34,32 @@ static int    g_tPhase = 0;      // 0 idle, 1 hover frame, 2 send down, 3 held
 static bool   g_tRelease = false;
 static bool   g_tLeave = false;
 
+static double g_lastFrame = 0.0;
+
 @interface OverlayWindow : UIWindow @end
 @implementation OverlayWindow
 - (BOOL)canBecomeKeyWindow { return NO; }
 - (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
     if (self.hidden) return nil;
     // ловим касания только по кнопке и окну меню, остальное идёт в игру
-    bool hit = CGRectContainsPoint(g_btnRect, p) || (g_open && CGRectContainsPoint(g_menuRect, p));
+    bool hit = CGRectContainsPoint(g_btnRect, p) || (g_menu.visible() && CGRectContainsPoint(g_menuRect, p));
     return hit ? [super hitTest:p withEvent:e] : nil;
 }
 @end
+
+// Кнопка вызова меню: собственный модуль меню, координаты не зависят от масштаба.
+static void draw_menu_button()
+{
+    if (g_menu.visible() || g_menu.fade() > 0.0f) {
+        g_btnRect = CGRectZero;
+        return;
+    }
+
+    const nl::LauncherRect r = nl::launcher_button();
+    if (r.pressed)
+        g_menu.set_visible(true);
+    g_btnRect = CGRectMake(r.x, r.y, r.w, r.h);
+}
 
 @interface SystemRenderView : MTKView <MTKViewDelegate>
 @property (nonatomic, strong) id<MTLCommandQueue> queue;
@@ -55,10 +82,21 @@ static bool   g_tLeave = false;
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
 
+<<<<<<< HEAD
     // Fonts, dark Neverlose-style theme and ImGui style for the menu.
     menu::init();
+=======
+    ImGuiIO &io = ImGui::GetIO();
+    io.IniFilename = nullptr;
+    io.LogFilename = nullptr;
+>>>>>>> 1324a15d57503dc315a2e04edf9268260ad9ac15
 
+    // Встроенные шрифты и стиль Neverlose-меню.
     ImGui_ImplMetal_Init(dev);
+    nl::load_fonts();
+    g_menu.init(ImVec2(0.0f, 0.0f));
+    g_menu.host_content = &nl::host_content;
+
     return self;
 }
 
@@ -84,7 +122,18 @@ static bool   g_tLeave = false;
     io.DisplaySize = ImVec2(view.bounds.size.width, view.bounds.size.height);
     CGFloat s = view.window.screen.scale ?: 3.0;
     io.DisplayFramebufferScale = ImVec2(s, s);
-    io.DeltaTime = 1.0f / 60.0f;
+
+    // Настоящее время кадра: анимации меню идут с частотой экрана.
+    const double now = CACurrentMediaTime();
+    if (g_lastFrame > 0.0) {
+        double delta = now - g_lastFrame;
+        if (delta < 1.0 / 240.0) delta = 1.0 / 240.0;
+        if (delta > 1.0 / 15.0) delta = 1.0 / 15.0;
+        io.DeltaTime = (float)delta;
+    } else {
+        io.DeltaTime = 1.0f / 60.0f;
+    }
+    g_lastFrame = now;
 
     // touch -> imgui: hover кадр, потом down, потом up + уход курсора
     io.AddMousePosEvent(g_tPos.x, g_tPos.y);
@@ -105,6 +154,7 @@ static bool   g_tLeave = false;
     rage::run();
     misc::run();
 
+<<<<<<< HEAD
     // Keep the menu inside the notch/home-indicator safe area on every iPhone.
     const UIEdgeInsets safe = view.safeAreaInsets;
     const float margin = 10.0f;
@@ -120,6 +170,13 @@ static bool   g_tLeave = false;
         // Full-screen hit area while open so ImGui popups (select / color picker)
         // can be touched even when they reach past the menu shell.
         g_menuRect = view.bounds;
+=======
+    g_menu.render();
+
+    if (g_menu.visible()) {
+        const ImVec2 p = g_menu.pos(), sz = g_menu.size();
+        g_menuRect = CGRectMake(p.x, p.y, sz.x, sz.y);
+>>>>>>> 1324a15d57503dc315a2e04edf9268260ad9ac15
     } else {
         const ImVec2 launchPos(margin + (float)safe.left, margin + (float)safe.top);
         const ImVec2 launchSize(84.0f, 34.0f);
@@ -129,6 +186,10 @@ static bool   g_tLeave = false;
         g_btnRect = CGRectMake(launchPos.x, launchPos.y, launchSize.x, launchSize.y);
         g_menuRect = CGRectZero;
     }
+    if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+        g_menuRect = view.bounds;
+
+    draw_menu_button();
 
     ImGui::Render();
     id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
