@@ -6,6 +6,7 @@ namespace aim
     inline bool silent = false;
     inline bool anti_aim = false;
 
+    inline bool aim_through_walls = false;
     inline bool automatic_fire = false;
 
     inline bool draw_fov = false;

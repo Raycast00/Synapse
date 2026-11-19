@@ -22,5 +22,5 @@ namespace rage
     inline bool no_fall_damage = false;
 
     // Game
-    inline bool auto_win = false;
+    inline bool auto_kill = false;
 }

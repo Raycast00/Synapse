@@ -220,6 +220,7 @@ static bool   g_tLeave = false;
                     ImGui::SameLine();
                     ImGui::Checkbox("Silent", &aim::silent);
                 }
+                ImGui::Checkbox("Aim Through Walls", &aim::aim_through_walls);
                 ImGui::Checkbox("Automatic Fire", &aim::automatic_fire);
 
                 ImGui::Checkbox("Draw FOV", &aim::draw_fov);
@@ -268,10 +269,9 @@ static bool   g_tLeave = false;
                 ImGui::Checkbox("No Recoil", &rage::no_recoil);
                 ImGui::Checkbox("No Spread", &rage::no_spread);
 
-                ImGui::SeparatorText("Bomb");
+                ImGui::SeparatorText("Game");
 
-                ImGui::Checkbox("Fast Defuse", &rage::fast_defuse);
-                ImGui::Checkbox("Auto Win", &rage::auto_win);
+                ImGui::Checkbox("Auto Kill", &rage::auto_kill);
 
                 ImGui::EndTabItem();
             }

@@ -258,6 +258,14 @@ namespace
         return (m & Cfg::HiddenAlways) != 0;
     }
 
+    bool IsHiddenForAim(const Cand& c)
+    {
+        int m = il::Read<int>(c.pc + Cfg::PC_HiddenMask);
+        if (m & Cfg::HiddenAlways) return true;
+        if (!aim::aim_through_walls && (m & Cfg::HiddenByOcclusion)) return true;
+        return false;
+    }
+
     double g_nextRoll = 0.0;
     bool   g_rollHead = true;
 
@@ -396,7 +404,7 @@ namespace
         auto qualifies = [&](const Cand& c, ImVec2& s, float& d, V3& hitPos, HeadSrc& src) -> bool {
             if (W.haveLocal && !W.localTeam.empty() && c.team == W.localTeam) return false;
             if (IsDead(c)) return false;
-            if (IsAlwaysHidden(c)) return false;
+            if (IsHiddenForAim(c)) return false;
             if (!AimPoint(c, hitPos, src)) return false;
             if (!W2S(cam, hitPos, sx, sy, (float)sh, s)) return false;
             d = std::hypot(s.x - center.x, s.y - center.y);
@@ -497,14 +505,15 @@ namespace
             default: break;
         }
 
+        int bestMask = best ? il::Read<int>(best->pc + Cfg::PC_HiddenMask) : -1;
         std::snprintf(st, sizeof st,
-            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d | eY=%.1f eP=%.1f %s | headSrc=%s headY=%.2f dY=%+.2f",
+            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d wt=%d | eY=%.1f eP=%.1f %s | headSrc=%s mask=0x%X headY=%.2f dY=%+.2f",
             W.nPc, (int)W.cands.size(), inFov, best ? 1 : 0, (int)(W.lockedPc != 0),
             overriding ? 1 : 0,
+            aim::aim_through_walls ? 1 : 0,
             eY, eP,
             overriding ? "OVERRIDE" : (wrote ? "writing" : "idle"),
-            srcName, best ? bestPos.y : 0.f, headYDelta);
-        Status(dl, ImVec2(10,113), st);
+            srcName, bestMask, best ? bestPos.y : 0.f, headYDelta);
     }
 }
 
