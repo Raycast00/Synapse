@@ -1,26 +1,29 @@
 #import <UIKit/UIKit.h>
 #import <MetalKit/MetalKit.h>
+#import <QuartzCore/QuartzCore.h>
 #include <float.h>
 #include "imgui.h"
 #include "imgui_impl_metal.h"
+
+#include "Menu/menu.h"
 
 #include "Features/Visuals/visuals.h"
 #include "Features/Aim/aim.h"
 #include "Features/Rage/rage.h"
 #include "Features/Misc/misc.h"
-#include "Settings/settings.h"
 
 #include "Memory/KittyInclude.hpp"
 
 static bool   g_open = false;
-static CGRect g_btnRect, g_menuRect;
-static bool   g_checkbox = false;
+static CGRect g_btnRect = CGRectZero, g_menuRect = CGRectZero;
 
 // touch state: клик уходит в imgui через кадр после hover
 static ImVec2 g_tPos = ImVec2(-FLT_MAX, -FLT_MAX);
 static int    g_tPhase = 0;      // 0 idle, 1 hover frame, 2 send down, 3 held
 static bool   g_tRelease = false;
 static bool   g_tLeave = false;
+
+static double g_lastFrame = 0.0;
 
 @interface OverlayWindow : UIWindow @end
 @implementation OverlayWindow
@@ -54,28 +57,14 @@ static bool   g_tLeave = false;
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
 
-    // Styling
-    ImGui::GetIO().IniFilename = nullptr;
+    ImGuiIO &io = ImGui::GetIO();
+    io.IniFilename = nullptr;
+    io.LogFilename = nullptr;
 
-    ImGui::GetIO().FontGlobalScale = 1.f;
-    ImGui::GetStyle().ScaleAllSizes(1.35f);
-
-    // Rounding shit
-    ImGui::GetStyle().FrameRounding = 3.0f;
-    ImGui::StyleColorsLight();
-    ImGui::GetStyle().WindowRounding = 5.5f;
-    ImGui::GetStyle().ScrollbarSize = 14.f;
-
-    ImGui::GetStyle().Colors[ImGuiCol_CheckMark] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
-    ImGui::GetStyle().Colors[ImGuiCol_TabSelectedOverline] = ImVec4(0, 0, 0, 0);
-    ImGui::GetStyle().Colors[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0, 0, 0, 0);
-
-    ImGui::GetStyle().TabBarBorderSize = 0.0f;
-
-    ImVec4 bgColor = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
-    ImGui::GetStyle().Colors[ImGuiCol_WindowBg] = ImVec4(0.97f, 0.97f, 0.97f, 0.95f); 
-
+    // Встроенные шрифты и стиль Neverlose-меню.
+    menu::init();
     ImGui_ImplMetal_Init(dev);
+
     return self;
 }
 
@@ -101,7 +90,18 @@ static bool   g_tLeave = false;
     io.DisplaySize = ImVec2(view.bounds.size.width, view.bounds.size.height);
     CGFloat s = view.window.screen.scale ?: 3.0;
     io.DisplayFramebufferScale = ImVec2(s, s);
-    io.DeltaTime = 1.0f / 60.0f;
+
+    // Настоящее время кадра: анимации меню идут с частотой экрана.
+    const double now = CACurrentMediaTime();
+    if (g_lastFrame > 0.0) {
+        double delta = now - g_lastFrame;
+        if (delta < 1.0 / 240.0) delta = 1.0 / 240.0;
+        if (delta > 1.0 / 15.0) delta = 1.0 / 15.0;
+        io.DeltaTime = (float)delta;
+    } else {
+        io.DeltaTime = 1.0f / 60.0f;
+    }
+    g_lastFrame = now;
 
     // touch -> imgui: hover кадр, потом down, потом up + уход курсора
     io.AddMousePosEvent(g_tPos.x, g_tPos.y);
@@ -117,33 +117,28 @@ static bool   g_tLeave = false;
     ImGui_ImplMetal_NewFrame(rpd);
     ImGui::NewFrame();
 
-    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
-
     visuals::run();
     aim::run();
     rage::run();
     misc::run();
 
-    // Кнопка вызова меню (всегда видна)
-    ImGui::SetNextWindowPos(ImVec2(20, 60), ImGuiCond_FirstUseEver);
-    ImGui::Begin("##btn", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                 ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar);
-    if (ImGui::Button(g_open ? "Close" : "Menu")) {
-        g_open = !g_open;
-    }
-    g_btnRect = CGRectMake(ImGui::GetWindowPos().x, ImGui::GetWindowPos().y,
-                           ImGui::GetWindowSize().x, ImGui::GetWindowSize().y);
-    ImGui::End();
+    // Keep the menu inside the notch/home-indicator safe area on every iPhone.
+    const UIEdgeInsets safe = view.safeAreaInsets;
+    const float margin = 10.0f;
 
-    // Само меню
     if (g_open) {
-        ImGui::SetNextWindowPos(ImVec2(120, 60), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(470, 300), ImGuiCond_FirstUseEver);
+        // The nlka canvas is 750x756: scale it uniformly to fit the safe area.
+        const float avail_w = view.bounds.size.width - (float)safe.left - (float)safe.right - margin * 2.0f;
+        const float avail_h = view.bounds.size.height - (float)safe.top - (float)safe.bottom - margin * 2.0f;
+        float scale = avail_w / 750.0f;
+        const float scale_y = avail_h / 756.0f;
+        if (scale_y < scale) scale = scale_y;
+        if (scale > 1.0f) scale = 1.0f;
 
-        ImGui::Begin("Synapse iPA", &g_open);
+        const ImVec2 menuOrigin((float)safe.left + margin + (avail_w - 750.0f * scale) * 0.5f,
+                                (float)safe.top + margin + (avail_h - 756.0f * scale) * 0.5f);
 
-        ImVec2 wp = ImGui::GetWindowPos(), ws = ImGui::GetWindowSize();
-        g_menuRect = CGRectInset(CGRectMake(wp.x, wp.y, ws.x, ws.y), -8, -8);
+        menu::render(&g_open, menuOrigin, scale);
 
         if (ImGui::BeginTabBar("Tabs"))
         {
@@ -300,8 +295,16 @@ static bool   g_tLeave = false;
         if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
             g_menuRect = view.bounds;
     } else {
+        const ImVec2 launchPos(margin + (float)safe.left, margin + (float)safe.top);
+        const ImVec2 launchSize(84.0f, 34.0f);
+
+        menu::launcher(&g_open, launchPos, launchSize);
+
+        g_btnRect = CGRectMake(launchPos.x, launchPos.y, launchSize.x, launchSize.y);
         g_menuRect = CGRectZero;
     }
+    if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+        g_menuRect = view.bounds;
 
     ImGui::Render();
     id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
