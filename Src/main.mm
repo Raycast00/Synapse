@@ -12,6 +12,8 @@
 #include "Features/Rage/rage.h"
 #include "Features/Misc/misc.h"
 
+#include "Settings/settings.h"
+
 #include "Memory/KittyInclude.hpp"
 
 static bool   g_open = false;
