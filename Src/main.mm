@@ -281,7 +281,6 @@ static double g_lastFrame = 0.0;
                 ImGui::Text("Settings");
                 ImGui::Checkbox("Watermark", &settings::watermark);
                 ImGui::Checkbox("Overlay", &settings::overlay);
-                ImGui::Combo("Theme", &settings::current_theme, settings::theme_type, IM_ARRAYSIZE(settings::theme_type));
                 ImGui::Text("iPA by wurvt");
                 ImGui::Text("v0.0.4b");
 
