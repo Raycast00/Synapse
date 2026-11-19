@@ -252,6 +252,7 @@ static bool   g_tLeave = false;
                 ImGui::SeparatorText("Player");
 
                 ImGui::Checkbox("Move Before Timer", &rage::MBT);
+                ImGui::Checkbox("Instant Respawn", &rage::instant_respawn);
 
                 ImGui::Checkbox("No Clip", &rage::flight);
                 if (rage::flight)
