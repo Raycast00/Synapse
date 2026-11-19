@@ -357,7 +357,7 @@ namespace
     // Крутим bodyTr (yaw) + саму камеру cam/arms-камеру напрямую (pitch+yaw), потому что PlayerLock.rotationX
     // сам по себе — просто число, которое какой-то другой скрипт применяет к Transform камеры в своём
     // Update/LateUpdate; синхронный вызов Shoot() может не дождаться этого применения.
-    bool SilentFire(void* camTr, void* bodyTr, const V3& eye, const Ang& cur,
+        bool SilentFire(void* camTr, void* bodyTr, const V3& eye, const Ang& cur,
                      const V3& targetPos, char* statusOut, size_t statusCap)
     {
         if (!A.kArms || !A.mShoot || !A.mCanShoot) {
@@ -390,13 +390,10 @@ namespace
         CallFloat(A.mLookXLimit, (void*)W.lock, limit);
         float newFp = std::clamp(origFp - eP, -limit, limit);
 
-        // ArmsController._cameraTransform (0x178, из дампа) — не подтверждено, что именно её читает
-        // FireRay, но она реально существует в этом билде; крутим на всякий случай тоже.
-        void* armsCamTr = nullptr;
-        {
-            uintptr_t armsCam = il::Read<uintptr_t>(arms + Cfg::Arms_CameraTransform);
-            if (il::ValidPtr(armsCam)) armsCamTr = (void*)armsCam;
-        }
+        // Диагностика: та же это камера, что и W.camera, или другая — крутить её НЕ будем,
+        // пока не подтверждено, что это отдельный объект (иначе снова задвоим поворот).
+        uintptr_t armsCam = il::Read<uintptr_t>(arms + Cfg::Arms_CameraTransform);
+        bool armsCamSame = (il::ValidPtr(armsCam) && (void*)armsCam == camTr);
 
         auto rotateWorldY = [&](void* tr, float deg) {
             if (!tr) return;
@@ -411,24 +408,20 @@ namespace
             il::Invoke(A.mRotate4, tr, a);
         };
 
-        // --- снап ---
+        // --- снап: yaw только на тело (камера унаследует через иерархию), pitch только на камеру ---
         rotateWorldY(bodyTr, eY);
-        rotateWorldY(camTr, eY);
         rotateLocalX(camTr, -eP);
-        if (armsCamTr) { rotateWorldY(armsCamTr, eY); rotateLocalX(armsCamTr, -eP); }
         il::Write<float>(W.lock + Cfg::PL_RotationX, newFp);
 
-        // --- выстрел прямым вызовом, синхронно, без ожидания реального инпута ---
         il::Invoke(A.mShoot, (void*)arms, nullptr);
 
         // --- возврат как было ---
         rotateWorldY(bodyTr, -eY);
-        rotateWorldY(camTr, -eY);
         rotateLocalX(camTr, eP);
-        if (armsCamTr) { rotateWorldY(armsCamTr, -eY); rotateLocalX(armsCamTr, eP); }
         il::Write<float>(W.lock + Cfg::PL_RotationX, origFp);
 
-        std::snprintf(statusOut, statusCap, "fired eY=%.1f eP=%.1f armsCam=%d", eY, eP, armsCamTr != nullptr);
+        std::snprintf(statusOut, statusCap, "fired eY=%.1f eP=%.1f armsCam=%s",
+                      eY, eP, !il::ValidPtr(armsCam) ? "null" : (armsCamSame ? "same" : "DIFF"));
         return true;
     }
 
