@@ -481,14 +481,14 @@ namespace
 
         bool silentActive = aim::silent && aim::aimbot;
 
-        // Финальная проверка цели: команда, смерть, скрыт раундом/спектатором; occlusion-маску
-        // учитываем только для видимого аима — сайленту видимость не важна, стреляет и сквозь стены.
         auto qualifies = [&](const Cand& c, ImVec2& s, float& d, V3& hitPos, HeadSrc& src) -> bool {
             if (W.haveLocal && !W.localTeam.empty() && c.team == W.localTeam) return false;
             if (IsDead(c)) return false;
             if (IsAlwaysHidden(c)) return false;
-            if (!silentActive) {
-                int m = il::Read<int>(c.pc + Cfg::PC_HiddenMask);
+            int m = il::Read<int>(c.pc + Cfg::PC_HiddenMask);
+            if (silentActive) {
+                if (m & Cfg::HiddenByOcclusion) return false;
+            } else {
                 if (!aim::aim_through_walls && (m & Cfg::HiddenByOcclusion)) return false;
             }
             if (!AimPoint(c, hitPos, src)) return false;
