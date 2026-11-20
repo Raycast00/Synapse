@@ -50,6 +50,8 @@ namespace
         // Silent aim: PlayerController._armsController и ArmsController._cameraTransform, из dump.cs
         constexpr uintptr_t PC_ArmsController    = 0x60;
         constexpr uintptr_t Arms_CameraTransform = 0x178;
+        // ArmsController._timeFired — подтверждено эмпирически (rage.mm): растёт только во время стрельбы.
+        constexpr uintptr_t Arms_TimeFired       = 0x1BC;
     }
 
     struct Api
@@ -272,14 +274,6 @@ namespace
         return (m & Cfg::HiddenAlways) != 0;
     }
 
-    bool IsHiddenForAim(const Cand& c)
-    {
-        int m = il::Read<int>(c.pc + Cfg::PC_HiddenMask);
-        if (m & Cfg::HiddenAlways) return true;
-        if (!aim::aim_through_walls && (m & Cfg::HiddenByOcclusion)) return true;
-        return false;
-    }
-
     double g_nextRoll = 0.0;
     bool   g_rollHead = true;
 
@@ -354,10 +348,9 @@ namespace
     static bool  s_haveLastHeadY = false;
 
     // Сайлент: пишем угол, стреляем прямым вызовом Shoot(), восстанавливаем — синхронно, без хуков.
-    // Крутим bodyTr (yaw) + саму камеру cam/arms-камеру напрямую (pitch+yaw), потому что PlayerLock.rotationX
-    // сам по себе — просто число, которое какой-то другой скрипт применяет к Transform камеры в своём
-    // Update/LateUpdate; синхронный вызов Shoot() может не дождаться этого применения.
-        bool SilentFire(void* camTr, void* bodyTr, const V3& eye, const Ang& cur,
+    // Yaw крутим только на bodyTr (камера в иерархии унаследует), pitch — только на camTr локально,
+    // чтобы не задваивать поворот. armsCam и TimeFired — чистая диагностика в статус-строке.
+    bool SilentFire(void* camTr, void* bodyTr, const V3& eye, const Ang& cur,
                      const V3& targetPos, char* statusOut, size_t statusCap)
     {
         if (!A.kArms || !A.mShoot || !A.mCanShoot) {
@@ -390,8 +383,6 @@ namespace
         CallFloat(A.mLookXLimit, (void*)W.lock, limit);
         float newFp = std::clamp(origFp - eP, -limit, limit);
 
-        // Диагностика: та же это камера, что и W.camera, или другая — крутить её НЕ будем,
-        // пока не подтверждено, что это отдельный объект (иначе снова задвоим поворот).
         uintptr_t armsCam = il::Read<uintptr_t>(arms + Cfg::Arms_CameraTransform);
         bool armsCamSame = (il::ValidPtr(armsCam) && (void*)armsCam == camTr);
 
@@ -408,20 +399,22 @@ namespace
             il::Invoke(A.mRotate4, tr, a);
         };
 
-        // --- снап: yaw только на тело (камера унаследует через иерархию), pitch только на камеру ---
         rotateWorldY(bodyTr, eY);
         rotateLocalX(camTr, -eP);
         il::Write<float>(W.lock + Cfg::PL_RotationX, newFp);
 
+        float tfBefore = il::Read<float>(arms + Cfg::Arms_TimeFired);
         il::Invoke(A.mShoot, (void*)arms, nullptr);
+        float tfAfter = il::Read<float>(arms + Cfg::Arms_TimeFired);
+        bool realShot = std::isfinite(tfBefore) && std::isfinite(tfAfter) && tfAfter != tfBefore;
 
-        // --- возврат как было ---
         rotateWorldY(bodyTr, -eY);
         rotateLocalX(camTr, eP);
         il::Write<float>(W.lock + Cfg::PL_RotationX, origFp);
 
-        std::snprintf(statusOut, statusCap, "fired eY=%.1f eP=%.1f armsCam=%s",
-                      eY, eP, !il::ValidPtr(armsCam) ? "null" : (armsCamSame ? "same" : "DIFF"));
+        std::snprintf(statusOut, statusCap, "fired eY=%.1f eP=%.1f cam=%s tf=%.2f->%.2f real=%d",
+                      eY, eP, !il::ValidPtr(armsCam) ? "null" : (armsCamSame ? "same" : "DIFF"),
+                      tfBefore, tfAfter, realShot);
         return true;
     }
 
@@ -486,11 +479,18 @@ namespace
         overriding = now < W.overrideUntil;
         D.lastY = cur.yaw; D.lastP = cur.pitch; D.have = true;
 
-        // Финальная проверка цели: команда, смерть, скрыт раундом/спектатором, попадание в FOV
+        bool silentActive = aim::silent && aim::aimbot;
+
+        // Финальная проверка цели: команда, смерть, скрыт раундом/спектатором; occlusion-маску
+        // учитываем только для видимого аима — сайленту видимость не важна, стреляет и сквозь стены.
         auto qualifies = [&](const Cand& c, ImVec2& s, float& d, V3& hitPos, HeadSrc& src) -> bool {
             if (W.haveLocal && !W.localTeam.empty() && c.team == W.localTeam) return false;
             if (IsDead(c)) return false;
-            if (IsHiddenForAim(c)) return false;
+            if (IsAlwaysHidden(c)) return false;
+            if (!silentActive) {
+                int m = il::Read<int>(c.pc + Cfg::PC_HiddenMask);
+                if (!aim::aim_through_walls && (m & Cfg::HiddenByOcclusion)) return false;
+            }
             if (!AimPoint(c, hitPos, src)) return false;
             if (!W2S(cam, hitPos, sx, sy, (float)sh, s)) return false;
             d = std::hypot(s.x - center.x, s.y - center.y);
@@ -539,7 +539,6 @@ namespace
 
         float eY = 0.f, eP = 0.f, cmdY = 0.f;
         bool wrote = false;
-        bool silentActive = aim::silent && aim::aimbot;
         char silentStatus[96] = "idle";
 
         if (silentActive) {

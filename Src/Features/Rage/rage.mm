@@ -57,6 +57,12 @@ namespace off {
     constexpr uintptr_t arms_TimeFired        = 0x1BC;  // float
     constexpr uintptr_t arms_NextDryFire      = 0x1C0;  // float
 
+    // ArmsController, живой накопленный кик отдачи (из dump.cs, подтверждено в отдельном разборе)
+    constexpr uintptr_t arms_CamRecoilV  = 0x1CC;
+    constexpr uintptr_t arms_CamRecoilH  = 0x1D0;
+    constexpr uintptr_t arms_RecoilBaseV = 0x1DC;
+    constexpr uintptr_t arms_RecoilBaseH = 0x1E0;
+
     // PlayerMovement
     constexpr uintptr_t pm_IsFreezing = 0x164;  // bool, читается в приватном get_Frozen()
     constexpr uintptr_t pm_IsGrounded = 0x15C;  // bool, public _isGrounded
@@ -176,6 +182,33 @@ static void applyRapidFire()
     }
 }
 
+// Живой per-instance штраф движения (AccuracyMult/Additive) и живой накопленный кик отдачи
+// (RecoilMult + CamRecoil*/RecoilBase*) — это то, что система ходьбы/прыжка двигает каждый кадр
+// ПОВЕРХ статических полей WeaponParameters, которые уже зануляет applyWeapon(). Без этого
+// no_spread/no_recoil держатся только стоя на месте.
+static void applyLiveAccuracy()
+{
+    uintptr_t pc = localPlayerController();
+    if (!ok(pc)) return;
+    uintptr_t arms = Read<uintptr_t>(pc + off::pcArms);
+    if (!ok(arms)) return;
+
+    if (rage::no_spread) {
+        // 1.0 / 0.0 — нейтральные значения, выведены из того, что стоя на месте (без штрафа
+        // движения) у тебя и так всё чисто; если после этого разброс станет ХУЖЕ — семантика
+        // обратная, напиши, поменяем на большое значение вместо 1.0.
+        Write<float>(arms + off::arms_AccuracyMult, 1.0f);
+        Write<float>(arms + off::arms_AccuracyAdditive, 0.0f);
+    }
+    if (rage::no_recoil) {
+        Write<float>(arms + off::arms_RecoilMult, 1.0f);
+        Write<float>(arms + off::arms_CamRecoilV, 0.0f);
+        Write<float>(arms + off::arms_CamRecoilH, 0.0f);
+        Write<float>(arms + off::arms_RecoilBaseV, 0.0f);
+        Write<float>(arms + off::arms_RecoilBaseH, 0.0f);
+    }
+}
+
 static void applyMBT()
 {
     uintptr_t pc = localPlayerController();
@@ -191,7 +224,7 @@ static void applyNoFallDamage()
     if (!ok(pc)) return;
     uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement);
     if (!ok(mv)) return;
-    
+
     Write<float>(mv + 0xB8, 0.0f);
     Write<float>(mv + 0xB4, 0.0f);
 }
@@ -199,11 +232,11 @@ static void applyNoFallDamage()
 static void drawStatus(bool ilReady)
 {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
-    char l1[200], l2[200];
+    char l1[200], l2[200], l3[200];
 
     if (!ilReady) {
         std::snprintf(l1, sizeof l1, "RAGE: IL2CPP not ready");
-        l2[0] = 0;
+        l2[0] = 0; l3[0] = 0;
     } else {
         uintptr_t pc   = localPlayerController();
         uintptr_t arms = ok(pc) ? Read<uintptr_t>(pc + off::pcArms) : 0;
@@ -220,12 +253,23 @@ static void drawStatus(bool ilReady)
             ok(arms) ? Read<float>(arms + off::arms_TimeFired) : -1.f,
             ok(mv) ? (int)Read<uint8_t>(mv + off::pm_IsFreezing) : -1,
             ok(mv) ? (int)Read<uint8_t>(mv + off::pm_IsGrounded) : -1);
+
+        std::snprintf(l3, sizeof l3, "RAGE acc: mult=%.2f add=%.2f recMult=%.2f camRV=%.2f camRH=%.2f",
+            ok(arms) ? Read<float>(arms + off::arms_AccuracyMult) : -1.f,
+            ok(arms) ? Read<float>(arms + off::arms_AccuracyAdditive) : -1.f,
+            ok(arms) ? Read<float>(arms + off::arms_RecoilMult) : -1.f,
+            ok(arms) ? Read<float>(arms + off::arms_CamRecoilV) : -1.f,
+            ok(arms) ? Read<float>(arms + off::arms_CamRecoilH) : -1.f);
     }
     dl->AddText(ImVec2(11, 81), IM_COL32(0, 0, 0, 255), l1);
     dl->AddText(ImVec2(10, 80), IM_COL32(0, 255, 255, 255), l1);
     if (l2[0]) {
         dl->AddText(ImVec2(11, 97), IM_COL32(0, 0, 0, 255), l2);
         dl->AddText(ImVec2(10, 96), IM_COL32(0, 255, 255, 255), l2);
+    }
+    if (l3[0]) {
+        dl->AddText(ImVec2(11, 113), IM_COL32(0, 0, 0, 255), l3);
+        dl->AddText(ImVec2(10, 112), IM_COL32(0, 255, 255, 255), l3);
     }
 }
 
@@ -251,6 +295,7 @@ void rage::run()
     }
 
     if (rage::no_recoil) applyCameraRecoil();
+    if (rage::no_spread || rage::no_recoil) applyLiveAccuracy();
     if (rage::infinity_ammo) applyInfinityAmmo();
     if (rage::rapid_fire) applyRapidFire();
     if (rage::MBT)           applyMBT();
