@@ -13,9 +13,9 @@ jobs:
 
       - name: Compile dylib
         run: |
-          xcrun -sdk iphoneos clang++ -arch arm64 -miphoneos-version-min=14.0 -std=c++20 -fobjc-arc -O2 \
+          xcrun -sdk iphoneos clang++ -arch arm64 -miphoneos-version-min=14.0 -std=c++20 -fno-char8_t -fobjc-arc -O2 \
             -dynamiclib \
-            -I Src -I Src/ImGui -I Src/ImGui/Backends -I Src/Memory \
+            -I Src -I Src/ImGui -I Src/ImGui/Backends -I Src/Memory -I Src/Menu \
             Src/main.mm \
             Src/Features/Visuals/visuals.mm \
             Src/Features/Aim/aim.mm \
@@ -35,6 +35,18 @@ jobs:
             Src/ImGui/imgui_tables.cpp \
             Src/ImGui/imgui_widgets.cpp \
             Src/ImGui/Backends/imgui_impl_metal.mm \
+            Src/Menu/gui.cpp \
+            Src/Menu/menu_port.cpp \
+            Src/Menu/menu_fonts.mm \
+            Src/Menu/spotify_stub.cpp \
+            Src/Menu/gifbg_stub.cpp \
+            -Wl,-sectcreate,__TEXT,__mfont0,Src/Menu/Fonts/SSTMedium.TTF \
+            -Wl,-sectcreate,__TEXT,__mfont1,Src/Menu/Fonts/SSTBold.TTF \
+            -Wl,-sectcreate,__TEXT,__mfont2,Src/Menu/Fonts/SpaceGrotesk-SemiBold.ttf \
+            -Wl,-sectcreate,__TEXT,__mfont3,Src/Menu/Fonts/Inter-Medium.ttf \
+            -Wl,-sectcreate,__TEXT,__mfont4,Src/Menu/Fonts/Inter-SemiBold.ttf \
+            -Wl,-sectcreate,__TEXT,__mfont5,Src/Menu/Fonts/MuseoSansCyrl-700.ttf \
+            -Wl,-sectcreate,__TEXT,__mfont6,Src/Menu/Fonts/fa-solid-900.ttf \
             Src/Memory/Deps/Keystone/libs-ios/arm64/libkeystone.a \
             -framework UIKit -framework Foundation -framework Metal -framework MetalKit -framework QuartzCore -framework CoreGraphics \
             -o Synapse.dylib

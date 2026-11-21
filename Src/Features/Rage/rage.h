@@ -11,14 +11,12 @@ namespace rage
     inline bool perfect_accuracy = false;
     inline bool no_recoil = false;
     inline bool no_spread = false;
-    inline bool fast_defuse = false;
 
     // Player
     inline bool MBT = false;
-    inline bool instant_respawn = false;
 
     inline bool no_fall_damage = false;
 
     // Game
-    inline bool auto_kill = false;
+    inline bool auto_win = false;
 }

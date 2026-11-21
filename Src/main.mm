@@ -220,7 +220,6 @@ static bool   g_tLeave = false;
                     ImGui::SameLine();
                     ImGui::Checkbox("Silent", &aim::silent);
                 }
-                ImGui::Checkbox("Aim Through Walls", &aim::aim_through_walls);
                 ImGui::Checkbox("Automatic Fire", &aim::automatic_fire);
 
                 ImGui::Checkbox("Draw FOV", &aim::draw_fov);
@@ -251,9 +250,6 @@ static bool   g_tLeave = false;
             {
                 ImGui::SeparatorText("Player");
 
-                ImGui::Checkbox("Move Before Timer", &rage::MBT);
-                ImGui::Checkbox("Instant Respawn", &rage::instant_respawn);
-
                 ImGui::Checkbox("Wallbang", &rage::wallbang);
                 ImGui::Checkbox("No Fall Damage", &rage::no_fall_damage);
 
@@ -274,7 +270,6 @@ static bool   g_tLeave = false;
 
             if (ImGui::BeginTabItem("Settings"))
             {
-                ImGui::Text("Settings");
                 ImGui::Checkbox("Watermark", &settings::watermark);
                 ImGui::Checkbox("Overlay", &settings::overlay);
                 ImGui::Text("iPA by wurvt");
