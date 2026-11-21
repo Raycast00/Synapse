@@ -13,9 +13,9 @@ void inventory::draw_tab()
 {
     ImGuiStyle& style = ImGui::GetStyle();
 
-    // занимает всё свободное место вкладки, кроме небольшого отступа снизу/справа
+    // половина доступной ширины вкладки, высота на всё свободное место
     ImVec2 avail = ImGui::GetContentRegionAvail();
-    ImVec2 size(avail.x, avail.y);
+    ImVec2 size(avail.x * 0.5f, avail.y);
     if (size.x < 1.f || size.y < 1.f) return; // окно ещё не раскрыто/свёрнуто, не рисуем нулевой регион
 
     ImVec2 p0 = ImGui::GetCursorScreenPos();
