@@ -87,8 +87,6 @@ namespace off {
     constexpr uintptr_t smt_MaxSpeed        = 0x28;
 }
 
-struct V3 { float x, y, z; };
-
 struct Orig {
     float pellet, scoped, horiz, vert, air[off::airFloats];
     int   edge;
