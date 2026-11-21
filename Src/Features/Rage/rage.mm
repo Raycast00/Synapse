@@ -158,6 +158,14 @@ static uintptr_t localPlayerController()
     return cached;
 }
 
+static uintptr_t gameController()
+{
+    static void* klass = IL2CPP::Class("ScarletWork.Game", "GameController", "Assembly-CSharp");
+    for (uintptr_t go : IL2CPP::FindObjectsOfType(klass))
+        if (ok(go)) return go; // активный контроллер режима (DefuseController и т.п.) — ровно один
+    return 0;
+}
+
 static void applyInfinityAmmo()
 {
     uintptr_t pc = localPlayerController();
