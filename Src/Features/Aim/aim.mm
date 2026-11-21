@@ -344,6 +344,57 @@ namespace
         dl->AddText(pos, IM_COL32(255, 160, 0, 255), t);
     }
 
+    enum class LOS { Clear, ThinWall, Blocked };
+
+    // Реальный физический линкаст вместо ненадёжного PC_HiddenMask-бита. Physics.Linecast(Vector3,Vector3) —
+    // двухаргументный булевый оверлоад, выбран намеренно уникальным по числу параметров (см. объяснение выше).
+    bool Blocked(const V3& a, const V3& b)
+    {
+        static void* kPhysics  = il::Class("UnityEngine", "Physics", "UnityEngine.PhysicsModule");
+        static void* mLinecast = il::Method(kPhysics, "Linecast", 2);
+        if (!mLinecast) return false; // API не резолвился — не блокируем вслепую
+        V3 start = a, end = b;
+        void* args[2] = { &start, &end };
+        void* r = il::Invoke(mLinecast, nullptr, args);
+        if (!il::ValidPtr((uintptr_t)r)) return false;
+        return *((uint8_t*)r + 0x10) != 0;
+    }
+
+    // Эвристика толщины стены — НАША оценка через серию коротких линкастов, не настоящее правило игры
+    // (PassesWalls приватный, тело не декомпилировано). step/maxProbe/thicknessLimit — подобрать в игре.
+    LOS CheckWallbang(const V3& eye, const V3& target)
+    {
+        V3 d{ target.x - eye.x, target.y - eye.y, target.z - eye.z };
+        float dist = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+        if (dist < 0.3f) return LOS::Clear;
+        float inv = 1.f / dist;
+        V3 dir{ d.x * inv, d.y * inv, d.z * inv };
+
+        float stopAt = std::max(0.f, dist - 0.15f); // не упираемся в коллайдер самой цели
+        constexpr float step = 0.25f;
+        constexpr float maxProbe = 3.0f;
+        constexpr float thicknessLimit = 0.6f; // метров, требует подбора под реальные стены игры
+
+        V3 clearEnd{ eye.x + dir.x * stopAt, eye.y + dir.y * stopAt, eye.z + dir.z * stopAt };
+        if (!Blocked(eye, clearEnd)) return LOS::Clear;
+
+        float t = 0.f, enterT = -1.f;
+        float probeMax = std::min(stopAt, maxProbe);
+        while (t < probeMax) {
+            float segEnd = std::min(t + step, probeMax);
+            V3 p0{ eye.x + dir.x * t,      eye.y + dir.y * t,      eye.z + dir.z * t };
+            V3 p1{ eye.x + dir.x * segEnd, eye.y + dir.y * segEnd, eye.z + dir.z * segEnd };
+            bool segBlocked = Blocked(p0, p1);
+            if (segBlocked && enterT < 0.f) enterT = t;
+            if (!segBlocked && enterT >= 0.f) {
+                float thickness = t - enterT;
+                return (thickness <= thicknessLimit) ? LOS::ThinWall : LOS::Blocked;
+            }
+            t = segEnd;
+        }
+        return LOS::Blocked; // не вышла из стены в пределах maxProbe — считаем сплошной
+    }
+
     static float s_lastHeadY = 0.f;
     static bool  s_haveLastHeadY = false;
 
@@ -364,6 +415,14 @@ namespace
         bool canShoot = false;
         if (!CallBool(A.mCanShoot, (void*)arms, canShoot) || !canShoot) {
             std::snprintf(statusOut, statusCap, "CanShoot=false"); return false;
+        }
+
+        LOS los = CheckWallbang(eye, targetPos);
+        if (los == LOS::Blocked) {
+            std::snprintf(statusOut, statusCap, "blocked (no LOS)"); return false;
+        }
+        if (los == LOS::ThinWall && !aim::wallbang_thin_walls) {
+            std::snprintf(statusOut, statusCap, "thin wall, wallbang off"); return false;
         }
 
         V3 dir{ targetPos.x - eye.x, targetPos.y - eye.y, targetPos.z - eye.z };
@@ -412,7 +471,8 @@ namespace
         rotateLocalX(camTr, eP);
         il::Write<float>(W.lock + Cfg::PL_RotationX, origFp);
 
-        std::snprintf(statusOut, statusCap, "fired eY=%.1f eP=%.1f cam=%s tf=%.2f->%.2f real=%d",
+        std::snprintf(statusOut, statusCap, "fired(%s) eY=%.1f eP=%.1f cam=%s tf=%.2f->%.2f real=%d",
+                      los == LOS::Clear ? "LOS" : "WB",
                       eY, eP, !il::ValidPtr(armsCam) ? "null" : (armsCamSame ? "same" : "DIFF"),
                       tfBefore, tfAfter, realShot);
         return true;
@@ -485,12 +545,11 @@ namespace
             if (W.haveLocal && !W.localTeam.empty() && c.team == W.localTeam) return false;
             if (IsDead(c)) return false;
             if (IsAlwaysHidden(c)) return false;
-            int m = il::Read<int>(c.pc + Cfg::PC_HiddenMask);
-            if (silentActive) {
-                if (m & Cfg::HiddenByOcclusion) return false;
-            } else {
+            if (!silentActive) {
+                int m = il::Read<int>(c.pc + Cfg::PC_HiddenMask);
                 if (!aim::aim_through_walls && (m & Cfg::HiddenByOcclusion)) return false;
             }
+            // Для сайлента видимость/вуллбанг решает реальный линкаст в SilentFire, не этот бит.
             if (!AimPoint(c, hitPos, src)) return false;
             if (!W2S(cam, hitPos, sx, sy, (float)sh, s)) return false;
             d = std::hypot(s.x - center.x, s.y - center.y);

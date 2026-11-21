@@ -218,7 +218,7 @@ static void applyLiveAccuracy()
         // 1.0 / 0.0 — нейтральные значения, выведены из того, что стоя на месте (без штрафа
         // движения) у тебя и так всё чисто; если после этого разброс станет ХУЖЕ — семантика
         // обратная, напиши, поменяем на большое значение вместо 1.0.
-        Write<float>(arms + off::arms_AccuracyMult, 100.0f);
+        Write<float>(arms + off::arms_AccuracyMult, 0.001f);
         Write<float>(arms + off::arms_AccuracyAdditive, 0.0f);
     }
     if (rage::no_recoil) {
