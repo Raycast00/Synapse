@@ -1,20 +1,24 @@
 #pragma once
 #include "imgui.h"
 
+#pragma once
+#include "imgui.h"
+
 inline void ApplyGlassStyle()
 {
     ImGui::StyleColorsDark();
     ImGuiStyle& s = ImGui::GetStyle();
-    s.WindowRounding = 18.f; s.ChildRounding = 12.f; s.FrameRounding = 8.f;
-    s.PopupRounding  = 12.f; s.GrabRounding  = 8.f;  s.TabRounding   = 8.f;
-    s.ScrollbarRounding = 10.f;
+
+    // скругления как в первом main.mm; остальные остаются стандартными (после ScaleAllSizes)
+    s.WindowRounding = 5.5f;
+    s.FrameRounding  = 3.0f;
     s.WindowBorderSize = 1.f; s.FrameBorderSize = 0.f; s.TabBarBorderSize = 0.f;
 
     auto W = [](float a) { return ImVec4(1.f, 1.f, 1.f, a); };
     ImVec4* c = s.Colors;
-    c[ImGuiCol_WindowBg]   = ImVec4(0.14f, 0.09f, 0.30f, 0.30f);   // фиолетовый тинт поверх блюра
+    c[ImGuiCol_WindowBg]   = ImVec4(0.30f, 0.30f, 0.30f, 0.40f);   // серый тинт поверх блюра
     c[ImGuiCol_ChildBg]    = W(0.04f);
-    c[ImGuiCol_PopupBg]    = ImVec4(0.12f, 0.08f, 0.25f, 0.94f);   // попапы без блюра, поэтому почти непрозрачные
+    c[ImGuiCol_PopupBg]    = ImVec4(0.18f, 0.18f, 0.18f, 0.95f);   // попапы без блюра, поэтому почти непрозрачные
     c[ImGuiCol_Border]     = W(0.22f);
     c[ImGuiCol_Text]       = W(0.95f);
     c[ImGuiCol_TextDisabled] = W(0.45f);

@@ -15,8 +15,8 @@ void GlassBackdrop_Install(UIView *host, UIView *below) {
 
         CAGradientLayer *g = [CAGradientLayer layer];
         g.colors = @[
-            (id)[UIColor colorWithRed:0.55 green:0.35 blue:1.00 alpha:0.20].CGColor,
-            (id)[UIColor colorWithRed:0.20 green:0.30 blue:0.90 alpha:0.08].CGColor
+            (id)[UIColor colorWithWhite:1.0 alpha:0.10].CGColor,
+            (id)[UIColor colorWithWhite:1.0 alpha:0.03].CGColor
         ];
         g.startPoint = CGPointMake(0.15, 0.0);
         g.endPoint   = CGPointMake(0.85, 1.0);
