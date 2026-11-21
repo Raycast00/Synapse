@@ -239,32 +239,40 @@ static void applyNoFallDamage()
 
 static void applyAutoWin()
 {
+    uintptr_t gc = gameController();
+    if (!ok(gc)) return;
+
+    int32_t state = Read<int32_t>(gc + 0xC0); // GameController._matchState
+    static uintptr_t lastGc = 0;
+    static int32_t lastState = -1;
+    if (gc != lastGc) { lastGc = gc; lastState = state; } // новый матч/контроллер — без ложного триггера
+
+    bool enteredActive = (state == 4 /*ActiveRoundState*/) && (lastState != 4);
+    lastState = state;
+
+    if (!rage::auto_win || !enteredActive) return;
+
     uintptr_t pc = localPlayerController();
-    if (!ok(pc)) { rage::auto_win = false; return; }
+    if (!ok(pc)) return;
     uintptr_t pl = Read<uintptr_t>(pc + 0x90); // PlayerController._player
-    if (!ok(pl)) { rage::auto_win = false; return; }
+    if (!ok(pl)) return;
 
     static void* kPlayer  = IL2CPP::Class("Photon.Realtime", "Player", "PhotonRealtime");
     static void* mGetTeam = IL2CPP::Method(kPlayer, "get_Team", 0);
-    if (!mGetTeam) { rage::auto_win = false; return; }
+    if (!mGetTeam) return;
 
     void* teamStr = IL2CPP::Invoke(mGetTeam, (void*)pl, nullptr);
-    if (!ok((uintptr_t)teamStr)) { rage::auto_win = false; return; }
-
-    uintptr_t gc = gameController();
-    if (!ok(gc)) { rage::auto_win = false; return; }
+    if (!ok((uintptr_t)teamStr)) return;
 
     static void* kGC         = IL2CPP::Class("ScarletWork.Game", "GameController", "Assembly-CSharp");
     static void* mAddScore   = IL2CPP::Method(kGC, "AddScore", 2);
     static void* mCheckScore = IL2CPP::Method(kGC, "RoundCheckScore", 0);
-    if (!mAddScore) { rage::auto_win = false; return; }
+    if (!mAddScore) return;
 
     int32_t winType = 0; // WinType.MostPlayersKilled
     void* args[2] = { teamStr, &winType };
     IL2CPP::Invoke(mAddScore, (void*)gc, args);
     if (mCheckScore) IL2CPP::Invoke(mCheckScore, (void*)gc, nullptr);
-
-    rage::auto_win = false;
 }
 
 static void drawStatus(bool ilReady)
@@ -319,5 +327,5 @@ void rage::run()
     if (rage::rapid_fire) applyRapidFire();
     if (rage::MBT)           applyMBT();
     if (rage::no_fall_damage) applyNoFallDamage();
-    if (rage::auto_win) applyAutoWin();
+    applyAutoWin();
 }
