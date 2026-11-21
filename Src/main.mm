@@ -269,6 +269,7 @@ static bool   g_tLeave = false;
             {
                 ImGui::SeparatorText("Player");
 
+                Glass::Toggle("Move Before Timer", &rage::MBT);
                 Glass::Toggle("Wallbang", &rage::wallbang);
                 Glass::Toggle("No Fall Damage", &rage::no_fall_damage);
                 Glass::Toggle("Air Strafe", &rage::air_strafe);
