@@ -33,10 +33,7 @@ static bool   g_tLeave = false;
 - (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
     if (self.hidden) return nil;
     // ловим касания только по кнопке, окну меню и окну вьюера, остальное идёт в игру
-    bool hit = CGRectContainsPoint(g_btnRect, p) ||
-               (g_open && CGRectContainsPoint(g_menuRect, p)) ||
-               CGRectContainsPoint(inventory::viewer_hit_rect(), p);
-    return hit ? [super hitTest:p withEvent:e] : nil;
+    bool hit = CGRectContainsPoint(g_btnRect, p) || (g_open && CGRectContainsPoint(g_menuRect, p));
 }
 @end
 
@@ -312,7 +309,6 @@ static bool   g_tLeave = false;
     }
 
     // окно вьюера независимо от того, открыто ли главное меню
-    inventory::draw_viewer();
 
     ImGui::Render();
     id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
