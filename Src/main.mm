@@ -15,6 +15,7 @@
 #include "Render/GlassBackdrop.h"
 #include "Render/GlassPanel.h"
 #include "Render/GlassStyle.h"
+#include "Render/GlassWidgets.h"
 
 static bool   g_open = false;
 static CGRect g_btnRect, g_menuRect;
@@ -168,51 +169,51 @@ static bool   g_tLeave = false;
             if (ImGui::BeginTabItem("Visuals"))
             {
                 // ENEMY
-                ImGui::Checkbox("Enabled", &visuals::esp_enabled);
+                Glass::Toggle("Enabled", &visuals::esp_enabled);
 
                 ImGui::SeparatorText("Enemy");
 
-                ImGui::Checkbox("Box", &visuals::box2D);
+                Glass::Toggle("Box", &visuals::box2D, true);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## Box Color", visuals::box_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
                 if (visuals::box2D)
                 {
                     ImGui::SameLine();
-                    ImGui::Checkbox("Filled", &visuals::boxFill);
+                    Glass::Toggle("Filled", &visuals::boxFill);
                     ImGui::SameLine();
                     ImGui::ColorEdit4("## Box Fill Color", visuals::box_fill_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
 
                     ImGui::Combo("Box Type", &visuals::current_box_type, visuals::box_type, IM_ARRAYSIZE(visuals::box_type));
                 }
 
-                ImGui::Checkbox("Skeleton", &visuals::skeleton);
+                Glass::Toggle("Skeleton", &visuals::skeleton);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## Skeleton Color", visuals::skeleton_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
 
-                ImGui::Checkbox("Health Bar", &visuals::healthBar);
+                Glass::Toggle("Health Bar", &visuals::healthBar);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## Health Bar Color", visuals::healthbar_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
                 if (visuals::healthBar)
                 {
                     ImGui::SameLine();
-                    ImGui::Checkbox("Show Text", &visuals::healthBarText);
+                    Glass::Toggle("Show Text", &visuals::healthBarText);
                 }
 
-                ImGui::Checkbox("Names", &visuals::names);
+                Glass::Toggle("Names", &visuals::names);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## Names Color", visuals::names_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
 
-                ImGui::Checkbox("Weapon Text", &visuals::weaponText);
+                Glass::Toggle("Weapon Text", &visuals::weaponText);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## Weapon Text Color", visuals::weapon_text_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
                 
-                ImGui::Checkbox("Weapon Icon", &visuals::weaponIcon);
+                Glass::Toggle("Weapon Icon", &visuals::weaponIcon);
 
-                ImGui::Checkbox("Distance", &visuals::distance);
+                Glass::Toggle("Distance", &visuals::distance);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## Distance Color", visuals::distance_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
 
-                ImGui::Checkbox("Tracer", &visuals::tracer);
+                Glass::Toggle("Tracer", &visuals::tracer);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## Tracer Color", visuals::tracer_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
                 ImGui::EndTabItem();
@@ -220,27 +221,27 @@ static bool   g_tLeave = false;
                 // BOMB
                 ImGui::SeparatorText("Bomb");
 
-                ImGui::Checkbox("Timer", &visuals::bomb_timer_bar);
+                Glass::Toggle("Timer", &visuals::bomb_timer_bar);
 
                 // GRENADE
                 ImGui::SeparatorText("Grenade");
 
-                ImGui::Checkbox("Visualize Trajectory", &visuals::visualize_grenade_trajectory);
+                Glass::Toggle("Visualize Trajectory", &visuals::visualize_grenade_trajectory);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## Trajectory Color", visuals::grenade_trajectory_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
             }
 
             if (ImGui::BeginTabItem("Aim"))
             {
-                ImGui::Checkbox("AimBot", &aim::aimbot);
+                Glass::Toggle("AimBot", &aim::aimbot);
                 if (aim::aimbot)
                 {
                     ImGui::SameLine();
-                    ImGui::Checkbox("Silent", &aim::silent);
+                    Glass::Toggle("Silent", &aim::silent);
                 }
-                ImGui::Checkbox("Automatic Fire", &aim::automatic_fire);
+                Glass::Toggle("Automatic Fire", &aim::automatic_fire);
 
-                ImGui::Checkbox("Draw FOV", &aim::draw_fov);
+                Glass::Toggle("Draw FOV", &aim::draw_fov);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## FOV Color", aim::fov_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
                 ImGui::SliderFloat("Field of View", &aim::fov_radius, 15.f, 180.f, "%.0f");
@@ -248,16 +249,16 @@ static bool   g_tLeave = false;
                 ImGui::SliderFloat("Smoothing", &aim::aimbot_smoothing, 0.f, 100.f, "%.0f%%");
                 ImGui::Combo("Hitboxes", &aim::current_aimbot_hitbox, aim::aimbot_hitboxes, IM_ARRAYSIZE(aim::aimbot_hitboxes));
                 
-                ImGui::Checkbox("RCS", &aim::RCS);
+                Glass::Toggle("RCS", &aim::RCS);
 
                 // OTHER
                 ImGui::SeparatorText("Other");
-                ImGui::Checkbox("Visualize", &aim::aim_visualize_bullet);
+                Glass::Toggle("Visualize", &aim::aim_visualize_bullet);
 
                 // ANTI AIM
                 ImGui::SeparatorText("Anti Aim");
 
-                ImGui::Checkbox("Enabled", &aim::anti_aim);
+                Glass::Toggle("Enabled", &aim::anti_aim);
                 ImGui::SliderFloat("Pitch", &aim::anti_pitch, -90.f, 180.f, "%.1f");
                 ImGui::SliderFloat("Yaw", &aim::anti_yaw, -90.f, 90.f, "%.1f");
 
@@ -268,15 +269,15 @@ static bool   g_tLeave = false;
             {
                 ImGui::SeparatorText("Player");
 
-                ImGui::Checkbox("Wallbang", &rage::wallbang);
-                ImGui::Checkbox("No Fall Damage", &rage::no_fall_damage);
+                Glass::Toggle("Wallbang", &rage::wallbang);
+                Glass::Toggle("No Fall Damage", &rage::no_fall_damage);
 
                 ImGui::SeparatorText("Weapon");
 
-                ImGui::Checkbox("Infinity Ammo", &rage::infinity_ammo);
-                ImGui::Checkbox("Rapid Fire", &rage::rapid_fire);
-                ImGui::Checkbox("No Recoil", &rage::no_recoil);
-                ImGui::Checkbox("No Spread", &rage::no_spread);
+                Glass::Toggle("Infinity Ammo", &rage::infinity_ammo);
+                Glass::Toggle("Rapid Fire", &rage::rapid_fire);
+                Glass::Toggle("No Recoil", &rage::no_recoil);
+                Glass::Toggle("No Spread", &rage::no_spread);
 
                 ImGui::EndTabItem();
             }
@@ -288,8 +289,8 @@ static bool   g_tLeave = false;
 
             if (ImGui::BeginTabItem("Settings"))
             {
-                ImGui::Checkbox("Watermark", &settings::watermark);
-                ImGui::Checkbox("Overlay", &settings::overlay);
+                Glass::Toggle("Watermark", &settings::watermark);
+                Glass::Toggle("Overlay", &settings::overlay);
                 ImGui::Text("iPA by wurvt");
                 ImGui::Text("v0.0.4b");
 
