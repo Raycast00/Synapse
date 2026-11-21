@@ -1,6 +1,6 @@
 #import "GlassBackdrop.h"
 
-static const int kSlots = 2;
+static const int kSlots = 3;
 static UIVisualEffectView *g_views[kSlots];
 static CAGradientLayer    *g_grads[kSlots];
 

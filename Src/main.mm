@@ -7,7 +7,7 @@
 #include "Features/Visuals/visuals.h"
 #include "Features/Aim/aim.h"
 #include "Features/Rage/rage.h"
-#include "Features/Misc/misc.h"
+#include "Features/Inventory/inventory.h"
 #include "Settings/settings.h"
 
 #include "Memory/KittyInclude.hpp"
@@ -32,8 +32,10 @@ static bool   g_tLeave = false;
 - (BOOL)canBecomeKeyWindow { return NO; }
 - (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
     if (self.hidden) return nil;
-    // ловим касания только по кнопке и окну меню, остальное идёт в игру
-    bool hit = CGRectContainsPoint(g_btnRect, p) || (g_open && CGRectContainsPoint(g_menuRect, p));
+    // ловим касания только по кнопке, окну меню и окну вьюера, остальное идёт в игру
+    bool hit = CGRectContainsPoint(g_btnRect, p) ||
+               (g_open && CGRectContainsPoint(g_menuRect, p)) ||
+               CGRectContainsPoint(inventory::viewer_hit_rect(), p);
     return hit ? [super hitTest:p withEvent:e] : nil;
 }
 @end
@@ -129,7 +131,7 @@ static bool   g_tLeave = false;
     visuals::run();
     aim::run();
     rage::run();
-    misc::run();
+    inventory::run();
 
     // Кнопка вызова меню (всегда видна)
     ImGui::SetNextWindowPos(ImVec2(20, 60), ImGuiCond_FirstUseEver);
@@ -282,8 +284,9 @@ static bool   g_tLeave = false;
                 ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("Misc"))
+            if (ImGui::BeginTabItem("Inventory"))
             {
+                inventory::draw_tab();
                 ImGui::EndTabItem();
             }
 
@@ -307,6 +310,9 @@ static bool   g_tLeave = false;
         g_menuRect = CGRectZero;
         GlassBackdrop_Set(1, CGRectZero, 0, false);
     }
+
+    // окно вьюера независимо от того, открыто ли главное меню
+    inventory::draw_viewer();
 
     ImGui::Render();
     id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
