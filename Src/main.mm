@@ -32,8 +32,9 @@ static bool   g_tLeave = false;
 - (BOOL)canBecomeKeyWindow { return NO; }
 - (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
     if (self.hidden) return nil;
-    // ловим касания только по кнопке, окну меню и окну вьюера, остальное идёт в игру
+    // ловим касания только по кнопке и окну меню, остальное идёт в игру
     bool hit = CGRectContainsPoint(g_btnRect, p) || (g_open && CGRectContainsPoint(g_menuRect, p));
+    return hit ? [super hitTest:p withEvent:e] : nil;
 }
 @end
 
