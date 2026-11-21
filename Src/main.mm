@@ -12,6 +12,10 @@
 
 #include "Memory/KittyInclude.hpp"
 
+#include "Render/GlassBackdrop.h"
+#include "Render/GlassPanel.h"
+#include "Render/GlassStyle.h"
+
 static bool   g_open = false;
 static CGRect g_btnRect, g_menuRect;
 static bool   g_checkbox = false;
@@ -75,6 +79,8 @@ static bool   g_tLeave = false;
     ImVec4 bgColor = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
     ImGui::GetStyle().Colors[ImGuiCol_WindowBg] = ImVec4(0.97f, 0.97f, 0.97f, 0.95f); 
 
+    ApplyGlassStyle();   // стеклянный стиль, перекрывает цвета и скругления выше
+
     ImGui_ImplMetal_Init(dev);
     return self;
 }
@@ -128,6 +134,12 @@ static bool   g_tLeave = false;
     ImGui::SetNextWindowPos(ImVec2(20, 60), ImGuiCond_FirstUseEver);
     ImGui::Begin("##btn", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                  ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar);
+    {
+        ImVec2 bp = ImGui::GetWindowPos(), bs = ImGui::GetWindowSize();
+        float rd = ImGui::GetStyle().WindowRounding;
+        Glass::Gloss(bp, ImVec2(bp.x + bs.x, bp.y + bs.y), rd);
+        GlassBackdrop_Set(0, CGRectMake(bp.x, bp.y, bs.x, bs.y), rd, true);
+    }
     if (ImGui::Button(g_open ? "Close" : "Menu")) {
         g_open = !g_open;
     }
@@ -144,6 +156,12 @@ static bool   g_tLeave = false;
 
         ImVec2 wp = ImGui::GetWindowPos(), ws = ImGui::GetWindowSize();
         g_menuRect = CGRectInset(CGRectMake(wp.x, wp.y, ws.x, ws.y), -8, -8);
+
+        {
+            float rd = ImGui::GetStyle().WindowRounding;
+            Glass::Gloss(wp, ImVec2(wp.x + ws.x, wp.y + ws.y), rd);
+            GlassBackdrop_Set(1, CGRectMake(wp.x, wp.y, ws.x, ws.y), rd, true);
+        }
 
         if (ImGui::BeginTabBar("Tabs"))
         {
@@ -286,6 +304,7 @@ static bool   g_tLeave = false;
             g_menuRect = view.bounds;
     } else {
         g_menuRect = CGRectZero;
+        GlassBackdrop_Set(1, CGRectZero, 0, false);
     }
 
     ImGui::Render();
@@ -315,9 +334,15 @@ static void tryInstall(void) {
     g_win.frame = scene.coordinateSpace.bounds;
     g_win.windowLevel = UIWindowLevelNormal + 1;
     g_win.backgroundColor = UIColor.clearColor;
+
     UIViewController *vc = [UIViewController new];
-    vc.view = [[SystemRenderView alloc] initWithFrame:g_win.bounds];
-    vc.view.backgroundColor = UIColor.clearColor;
+    UIView *root = [[UIView alloc] initWithFrame:g_win.bounds];
+    root.backgroundColor = UIColor.clearColor;
+    SystemRenderView *rv = [[SystemRenderView alloc] initWithFrame:root.bounds];
+    rv.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [root addSubview:rv];
+    GlassBackdrop_Install(root, rv);   // блюр-подложки лежат под MTKView
+    vc.view = root;
     g_win.rootViewController = vc;
     g_win.hidden = NO;
 }
