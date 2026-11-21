@@ -241,25 +241,6 @@ static void drawStatus(bool ilReady)
         uintptr_t pc   = localPlayerController();
         uintptr_t arms = ok(pc) ? Read<uintptr_t>(pc + off::pcArms) : 0;
         uintptr_t mv   = ok(pc) ? Read<uintptr_t>(pc + off::pcMovement) : 0;
-
-        std::snprintf(l1, sizeof l1,
-            "RAGE tog: ammo=%d rate=%d mbt=%d rec=%d spr=%d | pc=%d arms=%d mv=%d wpn=%d cam=%d",
-            rage::infinity_ammo, rage::rapid_fire, rage::MBT, rage::no_recoil, rage::no_spread,
-            ok(pc), ok(arms), ok(mv), (int)g_weapons.size(), ok(fpsCamera()));
-
-        std::snprintf(l2, sizeof l2, "RAGE val: mag=%d res=%d timeFired=%.2f freezing=%d grounded=%d",
-            ok(arms) ? (int)Read<int16_t>(arms + off::arms_MagazineCapacity) : -1,
-            ok(arms) ? (int)Read<int16_t>(arms + off::arms_Capacity) : -1,
-            ok(arms) ? Read<float>(arms + off::arms_TimeFired) : -1.f,
-            ok(mv) ? (int)Read<uint8_t>(mv + off::pm_IsFreezing) : -1,
-            ok(mv) ? (int)Read<uint8_t>(mv + off::pm_IsGrounded) : -1);
-
-        std::snprintf(l3, sizeof l3, "RAGE acc: mult=%.2f add=%.2f recMult=%.2f camRV=%.2f camRH=%.2f",
-            ok(arms) ? Read<float>(arms + off::arms_AccuracyMult) : -1.f,
-            ok(arms) ? Read<float>(arms + off::arms_AccuracyAdditive) : -1.f,
-            ok(arms) ? Read<float>(arms + off::arms_RecoilMult) : -1.f,
-            ok(arms) ? Read<float>(arms + off::arms_CamRecoilV) : -1.f,
-            ok(arms) ? Read<float>(arms + off::arms_CamRecoilH) : -1.f);
     }
     dl->AddText(ImVec2(11, 81), IM_COL32(0, 0, 0, 255), l1);
     dl->AddText(ImVec2(10, 80), IM_COL32(0, 255, 255, 255), l1);
