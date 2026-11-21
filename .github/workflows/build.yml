@@ -17,6 +17,7 @@ jobs:
             -dynamiclib \
             -I Src -I Src/ImGui -I Src/ImGui/Backends -I Src/Memory \
             Src/main.mm \
+            Src/Render/GlassBackdrop.mm \
             Src/Features/Visuals/visuals.mm \
             Src/Features/Aim/aim.mm \
             Src/Features/Rage/rage.mm \
