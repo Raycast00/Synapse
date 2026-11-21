@@ -279,6 +279,10 @@ static bool   g_tLeave = false;
                 Glass::Toggle("No Recoil", &rage::no_recoil);
                 Glass::Toggle("No Spread", &rage::no_spread);
 
+                ImGui::SeparatorText("Weapon");
+
+                Glass::Toggle("Auto Win", &rage::auto_win);
+
                 ImGui::EndTabItem();
             }
 
