@@ -67,12 +67,27 @@ namespace off {
     constexpr uintptr_t pm_IsFreezing = 0x164;  // bool, читается в приватном get_Frozen()
     constexpr uintptr_t pm_IsGrounded = 0x15C;  // bool, public _isGrounded
 
+    constexpr uintptr_t pm_Core            = 0x70; // PlayerMovement._core (SourceGameMovement)
+    constexpr uintptr_t pm_Tuning          = 0x28; // PlayerMovement._movement (SourceMovementTuning)
+    constexpr uintptr_t pm_CameraTransform = 0x30;
+
     constexpr uintptr_t pm_NoclipEnabled = 0x38; // public bool NoclipEnabled
     constexpr uintptr_t pm_NoclipSpeed   = 0x3C; // private float _noclipSpeed
 
     constexpr uintptr_t gc_FriendlyFire = 0x20;   // private bool _friendlyFire
     constexpr uintptr_t gc_RoundsToWin  = 0x94;   // <RoundsToWin>k__BackingField
+
+    // SourceGameMovement (dump.cs)
+    constexpr uintptr_t sgm_Velocity = 0x1C; // Vector3
+    constexpr uintptr_t sgm_OnGround = 0x29; // bool
+
+    // SourceMovementTuning (dump.cs)
+    constexpr uintptr_t smt_AirAccelerate   = 0x20;
+    constexpr uintptr_t smt_AirWishSpeedCap = 0x24;
+    constexpr uintptr_t smt_MaxSpeed        = 0x28;
 }
+
+struct V3 { float x, y, z; };
 
 struct Orig {
     float pellet, scoped, horiz, vert, air[off::airFloats];
@@ -237,6 +252,64 @@ static void applyNoFallDamage()
     Write<float>(mv + 0xB4, 0.0f);
 }
 
+struct V3 { float x, y, z; };
+
+// Реальная формула воздушного ускорения Quake/Source (публично известная, не секрет игры),
+// константы AirAccelerate/AirWishSpeedCap/MaxSpeed — настоящие значения этого билда (dump.cs).
+static void applyAirStrafe()
+{
+    if (!rage::air_strafe) return;
+
+    uintptr_t pc = localPlayerController();
+    if (!ok(pc)) return;
+    uintptr_t mv = Read<uintptr_t>(pc + off::pcMovement);
+    if (!ok(mv)) return;
+
+    uintptr_t core = Read<uintptr_t>(mv + off::pm_Core);
+    if (!ok(core)) return;
+    bool onGround = Read<uint8_t>(core + off::sgm_OnGround) != 0;
+    if (onGround) return; // работаем только в воздухе
+
+    uintptr_t camTr = Read<uintptr_t>(mv + off::pm_CameraTransform);
+    if (!ok(camTr)) return;
+
+    static void* kTr  = IL2CPP::Class("UnityEngine", "Transform", "UnityEngine.CoreModule");
+    static void* mFwd = IL2CPP::Method(kTr, "get_forward", 0);
+    if (!mFwd) return;
+
+    V3 fwd = IL2CPP::InvokeBoxed<V3>(mFwd, (void*)camTr, nullptr);
+    float fl = std::sqrt(fwd.x * fwd.x + fwd.z * fwd.z);
+    if (!(fl > 1e-4f)) return;
+    float dirX = fwd.x / fl, dirZ = fwd.z / fl;
+
+    V3 vel = Read<V3>(core + off::sgm_Velocity);
+    float horizSpeed = std::sqrt(vel.x * vel.x + vel.z * vel.z);
+
+    uintptr_t tuning  = Read<uintptr_t>(mv + off::pm_Tuning);
+    float airAccel = ok(tuning) ? Read<float>(tuning + off::smt_AirAccelerate)   : 0.f;
+    float wishCap  = ok(tuning) ? Read<float>(tuning + off::smt_AirWishSpeedCap) : 0.f;
+    float maxSpeed = ok(tuning) ? Read<float>(tuning + off::smt_MaxSpeed)        : 0.f;
+    float speedCap = (wishCap > 0.f) ? wishCap : maxSpeed;
+
+    float dt = std::clamp(ImGui::GetIO().DeltaTime, 0.001f, 0.1f);
+    float wishSpeed = (speedCap > 0.f) ? speedCap : horizSpeed;
+    float currentSpeed = vel.x * dirX + vel.z * dirZ; // dot(velocity, wishdir)
+    float addSpeed = wishSpeed - currentSpeed;
+
+    if (addSpeed > 0.f) {
+        float accelSpeed = std::min(airAccel * wishSpeed * dt, addSpeed);
+        vel.x += accelSpeed * dirX;
+        vel.z += accelSpeed * dirZ;
+    } else {
+        // Резкая смена направления: сохраняем текущую величину скорости, не даём ей просесть.
+        vel.x = dirX * horizSpeed;
+        vel.z = dirZ * horizSpeed;
+    }
+
+    Write<float>(core + off::sgm_Velocity,     vel.x);
+    Write<float>(core + off::sgm_Velocity + 8, vel.z); // Y (+0x20) не трогаем
+}
+
 static void applyAutoWin()
 {
     uintptr_t gc = gameController();
@@ -328,4 +401,5 @@ void rage::run()
     if (rage::MBT)           applyMBT();
     if (rage::no_fall_damage) applyNoFallDamage();
     applyAutoWin();
+    applyAirStrafe();
 }

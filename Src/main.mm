@@ -271,6 +271,7 @@ static bool   g_tLeave = false;
 
                 Glass::Toggle("Wallbang", &rage::wallbang);
                 Glass::Toggle("No Fall Damage", &rage::no_fall_damage);
+                Glass::Toggle("Air Strafe", &rage::air_strafe);
 
                 ImGui::SeparatorText("Weapon");
 
