@@ -672,6 +672,8 @@ namespace
             overriding ? "OVERRIDE" : (wrote ? "writing" : "idle"),
             srcName, bestMask, best ? bestPos.y : 0.f, headYDelta,
             silentActive ? silentStatus : "off");
+
+        Status(dl, ImVec2(10, 113), st);
     }
 }
 
