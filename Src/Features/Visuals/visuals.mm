@@ -818,7 +818,7 @@ void visuals::run()
         }
     } else g_bombMax = 0.f;
 
-    if (visualize_grenade_trajectory) {
+    if (grenade_trajectory) {
         DrawGrenadePreview(dl, sx, sy, sh);       // пока граната в руке
         DrawGrenadeTrajectories(dl, sx, sy, sh);  // после броска — живой след + короткий прогноз
     }
