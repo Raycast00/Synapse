@@ -151,7 +151,7 @@ static bool   g_tLeave = false;
     // Само меню
     if (g_open) {
         ImGui::SetNextWindowPos(ImVec2(120, 60), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(470, 300), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(520, 350), ImGuiCond_FirstUseEver);
 
         ImGui::Begin("Synapse iPA", &g_open);
 
