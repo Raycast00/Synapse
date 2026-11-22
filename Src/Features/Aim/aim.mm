@@ -354,28 +354,32 @@ namespace
 
     enum class LOS { Clear, ThinWall, Blocked };
 
-    // Настоящие трейсы игры (dump.cs: ScarletWork.Hit.BulletTrace, SourceTrace.Mask) вместо
-    // Unity Physics.Linecast — тот в этом билде, похоже, не используется и вырезан линкером.
-    LOS CheckWallbang(const V3& eye, const V3& target)
+    // ClearNearby оказался ненадёжным (видимо, это не полный лайн-чек, судя по поведению) — убрал
+    // его из решения. Единственный критерий теперь — HardBlocked, с диагностикой через out-параметры.
+    LOS CheckWallbang(const V3& eye, const V3& target,
+                       bool* rawClear = nullptr, bool* rawHard = nullptr, int* maskOut = nullptr)
     {
-        if (!A.mClearNearby) return LOS::Clear; // API не резолвился — не блокируем вслепую
-
         V3 from = eye, to = target;
-        void* a2[2] = { &from, &to };
+
         bool clear = false;
-        {
+        if (A.mClearNearby) {
+            void* a2[2] = { &from, &to };
             void* r = il::Invoke(A.mClearNearby, nullptr, a2);
             if (il::ValidPtr((uintptr_t)r)) clear = *((uint8_t*)r + 0x10) != 0;
         }
-        if (clear) return LOS::Clear;
+        if (rawClear) *rawClear = clear;
 
-        if (!A.mHardBlocked) return LOS::Blocked;
+        if (!A.mHardBlocked) { if (maskOut) *maskOut = -1; return LOS::Clear; }
 
         int mask = A.fMask ? il::StaticField<int>(A.fMask) : -1;
+        if (maskOut) *maskOut = mask;
+
         void* a3[3] = { &from, &to, &mask };
         void* r = il::Invoke(A.mHardBlocked, nullptr, a3);
         bool hard = il::ValidPtr((uintptr_t)r) ? (*((uint8_t*)r + 0x10) != 0) : true;
-        return hard ? LOS::Blocked : LOS::ThinWall;
+        if (rawHard) *rawHard = hard;
+
+        return hard ? LOS::Blocked : LOS::Clear;
     }
 
     static float s_lastHeadY = 0.f;
@@ -403,9 +407,6 @@ namespace
         LOS los = CheckWallbang(eye, targetPos);
         if (los == LOS::Blocked) {
             std::snprintf(statusOut, statusCap, "blocked (no LOS)"); return false;
-        }
-        if (los == LOS::ThinWall && !aim::wallbang_thin_walls) {
-            std::snprintf(statusOut, statusCap, "thin wall, wallbang off"); return false;
         }
 
         V3 dir{ targetPos.x - eye.x, targetPos.y - eye.y, targetPos.z - eye.z };
@@ -638,13 +639,16 @@ namespace
             default: break;
         }
 
-        int bestMask = best ? il::Read<int>(best->pc + Cfg::PC_HiddenMask) : -1;
+        bool dCn = false, dHb = false; int dMask = -1;
+        if (best) CheckWallbang(eye, bestPos, &dCn, &dHb, &dMask);
+
         std::snprintf(st, sizeof st,
-            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d wt=%d trace=%d | eY=%.1f eP=%.1f %s | headSrc=%s mask=0x%X headY=%.2f dY=%+.2f | silent=%s",
+            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d wt=%d trace=%d cn=%d hb=%d msk=%d | eY=%.1f eP=%.1f %s | headSrc=%s mask=0x%X headY=%.2f dY=%+.2f | silent=%s",
             W.nPc, (int)W.cands.size(), inFov, best ? 1 : 0, (int)(W.lockedPc != 0),
             overriding ? 1 : 0,
             aim::aim_through_walls ? 1 : 0,
             A.mClearNearby != nullptr && A.mHardBlocked != nullptr,
+            dCn, dHb, dMask,
             eY, eP,
             overriding ? "OVERRIDE" : (wrote ? "writing" : "idle"),
             srcName, bestMask, best ? bestPos.y : 0.f, headYDelta,
