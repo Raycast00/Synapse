@@ -64,6 +64,7 @@ namespace
         void *mTeam{}, *mIsAlive{}, *mHealth{}, *mLookXLimit{};
         void *kSMR{}, *mGetBones{};
         void *kArms{}, *mShoot{}, *mCanShoot{};
+        // Настоящие трейсы игры для проверки стен сайлента (dump.cs: SourceTrace, ScarletWork.Hit.BulletTrace)
         void *kSourceTrace{}, *fMask{};
         void *kBulletTrace{}, *mClearNearby{}, *mHardBlocked{};
     } A;
@@ -85,12 +86,6 @@ namespace
         A.kArms     = il::Class("", "ArmsController", "Assembly-CSharp");
         A.mShoot    = il::Method(A.kArms, "Shoot", 0);
         A.mCanShoot = il::Method(A.kArms, "get_CanShoot", 0);
-
-        A.kSourceTrace = il::Class("", "SourceTrace", "Assembly-CSharp");
-        A.fMask        = A.kSourceTrace ? il::Field(A.kSourceTrace, "Mask") : nullptr;
-        A.kBulletTrace = il::Class("ScarletWork.Hit", "BulletTrace", "Assembly-CSharp");
-        A.mClearNearby = il::Method(A.kBulletTrace, "ClearNearby", 2);
-        A.mHardBlocked = il::Method(A.kBulletTrace, "HardBlocked", 3);
 
         void* kComponent  = il::Class("UnityEngine", "Component", core);
         void* kGameObject = il::Class("UnityEngine", "GameObject", core);
@@ -120,6 +115,13 @@ namespace
         need(A.mGetFwd, "get_forward"); need(A.mRotate4, "Transform.Rotate/4"); need(A.mW2S, "WorldToScreenPoint");
         need(A.mScreenW, "get_width"); need(A.mScreenH, "get_height");
         need(A.kArms, "ArmsController"); need(A.mShoot, "ArmsController.Shoot"); need(A.mCanShoot, "ArmsController.get_CanShoot");
+
+        // Не в need() — опционально, используется только сайлентом; остальной аимбот должен жить без них.
+        A.kSourceTrace = il::Class("", "SourceTrace", "Assembly-CSharp");
+        A.fMask        = A.kSourceTrace ? il::Field(A.kSourceTrace, "Mask") : nullptr;
+        A.kBulletTrace = il::Class("ScarletWork.Hit", "BulletTrace", "Assembly-CSharp");
+        A.mClearNearby = il::Method(A.kBulletTrace, "ClearNearby", 2);
+        A.mHardBlocked = il::Method(A.kBulletTrace, "HardBlocked", 3);
 
         A.ready = A.missing.empty();
         return A.ready;
@@ -354,8 +356,12 @@ namespace
 
     enum class LOS { Clear, ThinWall, Blocked };
 
-    // ClearNearby оказался ненадёжным (видимо, это не полный лайн-чек, судя по поведению) — убрал
-    // его из решения. Единственный критерий теперь — HardBlocked, с диагностикой через out-параметры.
+    // Проверка препятствия для сайлента: ClearNearby оказался ненадёжным индикатором (видимо, не
+    // полноценный лайн-чек на весь путь), поэтому решение принимает только HardBlocked —
+    // "непробиваемая преграда" по классификации самой игры (dump.cs: ScarletWork.Hit.BulletTrace,
+    // SourceTrace.Mask). ThinWall пока не возвращается (см. предупреждение в ответе) — зарезервировано
+    // на будущее, когда подключим TryStaticPath с реальным уроном вместо булевого хардблока.
+    // rawClear/rawHard/maskOut — необязательные указатели для живой диагностики в статус-строке.
     LOS CheckWallbang(const V3& eye, const V3& target,
                        bool* rawClear = nullptr, bool* rawHard = nullptr, int* maskOut = nullptr)
     {
@@ -455,6 +461,8 @@ namespace
         rotateLocalX(camTr, eP);
         il::Write<float>(W.lock + Cfg::PL_RotationX, origFp);
 
+        // los тут всегда LOS::Clear (Blocked уже вышел раньше) — "WB"-ветка временно недостижима,
+        // см. комментарий у CheckWallbang.
         std::snprintf(statusOut, statusCap, "fired(%s) eY=%.1f eP=%.1f cam=%s tf=%.2f->%.2f real=%d",
                       los == LOS::Clear ? "LOS" : "WB",
                       eY, eP, !il::ValidPtr(armsCam) ? "null" : (armsCamSame ? "same" : "DIFF"),
@@ -464,7 +472,7 @@ namespace
 
     void AimbotFrame(ImDrawList* dl, ImVec2 center)
     {
-        char st[380];
+        char st[420];
         if (!ResolveApi()) { std::snprintf(st, sizeof st, "AIM: missing %s", A.missing.c_str()); Status(dl, ImVec2(10,113), st); return; }
 
         double now = ImGui::GetTime();
@@ -533,7 +541,7 @@ namespace
                 int m = il::Read<int>(c.pc + Cfg::PC_HiddenMask);
                 if (!aim::aim_through_walls && (m & Cfg::HiddenByOcclusion)) return false;
             }
-            // Для сайлента видимость/вуллбанг решает реальный линкаст в SilentFire, не этот бит.
+            // Для сайлента видимость/вуллбанг решает реальный трейс в SilentFire, не этот бит.
             if (!AimPoint(c, hitPos, src)) return false;
             if (!W2S(cam, hitPos, sx, sy, (float)sh, s)) return false;
             d = std::hypot(s.x - center.x, s.y - center.y);
@@ -639,9 +647,11 @@ namespace
             default: break;
         }
 
+        // Живая диагностика HardBlocked/ClearNearby/Mask именно по текущей цели — см. статус-строку.
         bool dCn = false, dHb = false; int dMask = -1;
         if (best) CheckWallbang(eye, bestPos, &dCn, &dHb, &dMask);
 
+        int bestMask = best ? il::Read<int>(best->pc + Cfg::PC_HiddenMask) : -1;
         std::snprintf(st, sizeof st,
             "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d wt=%d trace=%d cn=%d hb=%d msk=%d | eY=%.1f eP=%.1f %s | headSrc=%s mask=0x%X headY=%.2f dY=%+.2f | silent=%s",
             W.nPc, (int)W.cands.size(), inFov, best ? 1 : 0, (int)(W.lockedPc != 0),

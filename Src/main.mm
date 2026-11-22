@@ -224,11 +224,14 @@ static bool   g_tLeave = false;
                 Glass::Toggle("Timer", &visuals::bomb_timer_bar);
 
                 // GRENADE
-                ImGui::SeparatorText("Grenade");
+                ImGui::SeparatorText("World");
+                Glass::Toggle("Grenade Icons", &visuals::grenade_icons);
 
-                Glass::Toggle("Visualize Trajectory", &visuals::visualize_grenade_trajectory);
+                Glass::Toggle("Grenade Trajectory", &visuals::grenade_trajectory);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## Trajectory Color", visuals::grenade_trajectory_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+
+                Glass::Toggle("Grenade Area", &visuals::grenade_area);
             }
 
             if (ImGui::BeginTabItem("Aim"))

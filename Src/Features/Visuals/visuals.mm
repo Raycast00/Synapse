@@ -770,8 +770,8 @@ void visuals::run()
         // Вертикальная полоска здоровья сбоку от бокса — отдельно от верхнего ряда пилюль.
         if (healthBar) {
             float frac = std::clamp((float)hp / Cfg::MaxHealth, 0.f, 1.f);
-            dl->AddRectFilled(ImVec2(a.x - 6, a.y - 1), ImVec2(a.x - 3, b.y + 1), IM_COL32(0, 0, 0, 180));
-            dl->AddRectFilled(ImVec2(a.x - 5, b.y - h * frac), ImVec2(a.x - 4, b.y), Col(healthbar_color));
+            dl->AddRectFilled(ImVec2(a.x - 6, a.y - 1), ImVec2(a.x - 2, b.y + 1), IM_COL32(0, 0, 0, 180));
+            dl->AddRectFilled(ImVec2(a.x - 5, b.y - h * frac), ImVec2(a.x - 3, b.y), Col(healthbar_color));
         }
 
         // Верхний ряд пилюль: Health Text (слева) — Names (центр) — Distance (справа).
