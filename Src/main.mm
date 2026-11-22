@@ -17,6 +17,9 @@
 #include "Render/GlassStyle.h"
 #include "Render/GlassWidgets.h"
 
+// Fonts
+#include "Fonts/NotoSans/Regular.h"
+
 static bool   g_open = false;
 static CGRect g_btnRect, g_menuRect;
 static bool   g_checkbox = false;
@@ -105,6 +108,7 @@ static bool   g_tLeave = false;
     if (!rpd) return;
 
     ImGuiIO &io = ImGui::GetIO();
+    io.Fonts->AddFontFromMemoryTTF(Regular, sizeof(Regular), 16.f);
     io.DisplaySize = ImVec2(view.bounds.size.width, view.bounds.size.height);
     CGFloat s = view.window.screen.scale ?: 3.0;
     io.DisplayFramebufferScale = ImVec2(s, s);
