@@ -64,6 +64,7 @@ namespace
         void *mTeam{}, *mIsAlive{}, *mHealth{}, *mLookXLimit{};
         void *kSMR{}, *mGetBones{};
         void *kArms{}, *mShoot{}, *mCanShoot{};
+        void *kPhysics{}, *mLinecast{};
     } A;
 
     bool ResolveApi()
@@ -83,6 +84,13 @@ namespace
         A.kArms     = il::Class("", "ArmsController", "Assembly-CSharp");
         A.mShoot    = il::Method(A.kArms, "Shoot", 0);
         A.mCanShoot = il::Method(A.kArms, "get_CanShoot", 0);
+
+        const char* physAsms[] = { "UnityEngine.PhysicsModule", "UnityEngine", "UnityEngine.CoreModule" };
+        for (const char* asmName : physAsms) {
+            A.kPhysics = il::Class("UnityEngine", "Physics", asmName);
+            if (A.kPhysics) break;
+        }
+        A.mLinecast = A.kPhysics ? il::Method(A.kPhysics, "Linecast", 2) : nullptr;
 
         void* kComponent  = il::Class("UnityEngine", "Component", core);
         void* kGameObject = il::Class("UnityEngine", "GameObject", core);
@@ -350,12 +358,10 @@ namespace
     // двухаргументный булевый оверлоад, выбран намеренно уникальным по числу параметров (см. объяснение выше).
     bool Blocked(const V3& a, const V3& b)
     {
-        static void* kPhysics  = il::Class("UnityEngine", "Physics", "UnityEngine.PhysicsModule");
-        static void* mLinecast = il::Method(kPhysics, "Linecast", 2);
-        if (!mLinecast) return false; // API не резолвился — не блокируем вслепую
+        if (!A.mLinecast) return false;
         V3 start = a, end = b;
         void* args[2] = { &start, &end };
-        void* r = il::Invoke(mLinecast, nullptr, args);
+        void* r = il::Invoke(A.mLinecast, nullptr, args);
         if (!il::ValidPtr((uintptr_t)r)) return false;
         return *((uint8_t*)r + 0x10) != 0;
     }
@@ -657,10 +663,11 @@ namespace
 
         int bestMask = best ? il::Read<int>(best->pc + Cfg::PC_HiddenMask) : -1;
         std::snprintf(st, sizeof st,
-            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d wt=%d | eY=%.1f eP=%.1f %s | headSrc=%s mask=0x%X headY=%.2f dY=%+.2f | silent=%s",
+            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d wt=%d phys=%d | eY=%.1f eP=%.1f %s | headSrc=%s mask=0x%X headY=%.2f dY=%+.2f | silent=%s",
             W.nPc, (int)W.cands.size(), inFov, best ? 1 : 0, (int)(W.lockedPc != 0),
             overriding ? 1 : 0,
             aim::aim_through_walls ? 1 : 0,
+            A.mLinecast != nullptr,
             eY, eP,
             overriding ? "OVERRIDE" : (wrote ? "writing" : "idle"),
             srcName, bestMask, best ? bestPos.y : 0.f, headYDelta,
