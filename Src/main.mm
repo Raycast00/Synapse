@@ -16,6 +16,7 @@
 #include "Render/GlassPanel.h"
 #include "Render/GlassStyle.h"
 #include "Render/GlassWidgets.h"
+#include "Render/GlassPopup.h"     // NEW: попап в отдельном слое
 
 // Fonts
 #include "Fonts/NotoSans/Regular.h"
@@ -24,22 +25,83 @@ static bool   g_open = false;
 static CGRect g_btnRect, g_menuRect;
 static bool   g_checkbox = false;
 
+// Демо-состояние для попапа Box: пока ни с чем не связано, заменишь на поля из visuals::
+static bool s_demo_fill = false, s_demo_glow = false, s_demo_transparent = false, s_demo_overlay = false;
+
 // touch state: клик уходит в imgui через кадр после hover
 static ImVec2 g_tPos = ImVec2(-FLT_MAX, -FLT_MAX);
 static int    g_tPhase = 0;      // 0 idle, 1 hover frame, 2 send down, 3 held
 static bool   g_tRelease = false;
 static bool   g_tLeave = false;
 
+// Копии ImDrawData: меню рисуется в основном слое, попап в верхнем
+static ImDrawData g_ddMenu, g_ddPopup;
+
 @interface OverlayWindow : UIWindow @end
 @implementation OverlayWindow
 - (BOOL)canBecomeKeyWindow { return NO; }
 - (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
     if (self.hidden) return nil;
-    // ловим касания только по кнопке и окну меню, остальное идёт в игру
-    bool hit = CGRectContainsPoint(g_btnRect, p) || (g_open && CGRectContainsPoint(g_menuRect, p));
+    // пока открыт попап, ловим все касания: тап мимо закрывает его; иначе только кнопку и окно меню
+    bool hit = Glass::PopupCapturesInput() ||
+               CGRectContainsPoint(g_btnRect, p) ||
+               (g_open && CGRectContainsPoint(g_menuRect, p));
     return hit ? [super hitTest:p withEvent:e] : nil;
 }
 @end
+
+// Верхний слой: рисует только окно попапа (draw data готовит SystemRenderView)
+@interface PopupLayerView : MTKView <MTKViewDelegate>
+@property (nonatomic, strong) id<MTLCommandQueue> queue;
+@property (nonatomic, assign) ImDrawData *drawData;
+@end
+
+@implementation PopupLayerView
+
+- (instancetype)initWithFrame:(CGRect)f device:(id<MTLDevice>)dev {
+    self = [super initWithFrame:f device:dev];
+    if (!self) return nil;
+    self.delegate = self;
+    self.queue = [dev newCommandQueue];
+    self.clearColor = MTLClearColorMake(0, 0, 0, 0);
+    self.opaque = NO;
+    self.backgroundColor = UIColor.clearColor;
+    ((CAMetalLayer *)self.layer).opaque = NO;
+    self.paused = YES;                       // рисуем вручную из SystemRenderView
+    self.enableSetNeedsDisplay = NO;
+    self.hidden = YES;
+    return self;
+}
+
+- (void)touchesBegan:(NSSet *)t withEvent:(UIEvent *)e {
+    CGPoint p = [[t anyObject] locationInView:self];
+    g_tPos = ImVec2(p.x, p.y);
+    g_tPhase = 1; g_tRelease = false; g_tLeave = false;
+}
+- (void)touchesMoved:(NSSet *)t withEvent:(UIEvent *)e {
+    CGPoint p = [[t anyObject] locationInView:self];
+    g_tPos = ImVec2(p.x, p.y);
+}
+- (void)touchesEnded:(NSSet *)t withEvent:(UIEvent *)e     { g_tRelease = true; }
+- (void)touchesCancelled:(NSSet *)t withEvent:(UIEvent *)e { g_tRelease = true; }
+
+- (void)mtkView:(MTKView *)v drawableSizeWillChange:(CGSize)s {}
+
+- (void)drawInMTKView:(MTKView *)view {
+    if (!self.drawData) return;
+    MTLRenderPassDescriptor *rpd = view.currentRenderPassDescriptor;
+    if (!rpd) return;
+    id<MTLCommandBuffer> cb = [self.queue commandBuffer];
+    id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
+    ImGui_ImplMetal_RenderDrawData(self.drawData, cb, enc);
+    [enc endEncoding];
+    [cb presentDrawable:view.currentDrawable];
+    [cb commit];
+}
+
+@end
+
+static PopupLayerView *g_popupLayer;
 
 @interface SystemRenderView : MTKView <MTKViewDelegate>
 @property (nonatomic, strong) id<MTLCommandQueue> queue;
@@ -180,6 +242,25 @@ static bool   g_tLeave = false;
                 Glass::Toggle("Box", &visuals::box2D, true);
                 ImGui::SameLine();
                 ImGui::ColorEdit4("## Box Color", visuals::box_color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+
+                // Попап настроек Box (открывается по трём точкам)
+                if (Glass::BeginTogglePopup())
+                {
+                    if (Glass::BeginPopupSection())
+                    {
+                        Glass::PopupToggle("Fill", &s_demo_fill);
+                        Glass::PopupToggle("Glow", &s_demo_glow);
+                        Glass::EndPopupSection();
+                    }
+                    if (Glass::BeginPopupSection())
+                    {
+                        Glass::PopupToggle("Transparent", &s_demo_transparent);
+                        Glass::PopupToggle("Overlay", &s_demo_overlay);
+                        Glass::EndPopupSection();
+                    }
+                    Glass::EndTogglePopup();
+                }
+
                 if (visuals::box2D)
                 {
                     ImGui::SameLine();
@@ -328,12 +409,47 @@ static bool   g_tLeave = false;
 
     inventory::end_frame();
 
+    // итог по попапу за этот кадр (до Render)
+    Glass::PopupVisual pv = Glass::PopupEndFrame();
+
     ImGui::Render();
+    ImDrawData *dd = ImGui::GetDrawData();
+
+    // Попап уходит в верхний слой: делим список отрисовки на «меню» и «попап»
+    bool layered = (pv.visible && pv.draw_list && dd);
+    if (layered) {
+        g_ddMenu  = *dd;
+        g_ddPopup = *dd;
+        g_ddMenu.CmdLists.resize(0);  g_ddMenu.CmdListsCount  = 0; g_ddMenu.TotalVtxCount  = 0; g_ddMenu.TotalIdxCount  = 0;
+        g_ddPopup.CmdLists.resize(0); g_ddPopup.CmdListsCount = 0; g_ddPopup.TotalVtxCount = 0; g_ddPopup.TotalIdxCount = 0;
+        for (int i = 0; i < dd->CmdLists.Size; ++i) {
+            ImDrawList *l = dd->CmdLists[i];
+            ImDrawData &dst = (l == pv.draw_list) ? g_ddPopup : g_ddMenu;
+            dst.CmdLists.push_back(l);
+            dst.CmdListsCount++;
+            dst.TotalVtxCount += l->VtxBuffer.Size;
+            dst.TotalIdxCount += l->IdxBuffer.Size;
+        }
+    }
+
     id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
-    ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), cb, enc);
+    ImGui_ImplMetal_RenderDrawData(layered ? &g_ddMenu : dd, cb, enc);
     [enc endEncoding];
     [cb presentDrawable:view.currentDrawable];
     [cb commit];
+
+    if (g_popupLayer) {
+        if (layered) {
+            GlassBackdrop_SetPopup(CGRectMake(pv.pos.x, pv.pos.y, pv.size.x, pv.size.y), pv.rounding, pv.alpha);
+            g_popupLayer.drawData = &g_ddPopup;
+            g_popupLayer.hidden = NO;
+            [g_popupLayer draw];
+        } else {
+            GlassBackdrop_SetPopup(CGRectZero, 0, 0);
+            g_popupLayer.drawData = nullptr;
+            g_popupLayer.hidden = YES;
+        }
+    }
 }
 
 @end
@@ -359,10 +475,18 @@ static void tryInstall(void) {
     UIViewController *vc = [UIViewController new];
     UIView *root = [[UIView alloc] initWithFrame:g_win.bounds];
     root.backgroundColor = UIColor.clearColor;
+
     SystemRenderView *rv = [[SystemRenderView alloc] initWithFrame:root.bounds];
     rv.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [root addSubview:rv];
-    GlassBackdrop_Install(root, rv);   // блюр-подложки лежат под MTKView
+    GlassBackdrop_Install(root, rv);        // блюр-подложки меню лежат под основным MTKView
+    GlassBackdrop_InstallPopup(root, rv);   // блюр попапа лежит над основным MTKView
+
+    PopupLayerView *pl = [[PopupLayerView alloc] initWithFrame:root.bounds device:rv.device];
+    pl.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [root addSubview:pl];                   // самый верхний слой: только попап
+    g_popupLayer = pl;
+
     vc.view = root;
     g_win.rootViewController = vc;
     g_win.hidden = NO;

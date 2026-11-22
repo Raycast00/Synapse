@@ -4,113 +4,154 @@
 #include <unordered_map>
 
 namespace Glass {
+namespace detail {
 
-// show_dots = true добавляет кнопку с тремя точками справа от лейбла.
-// Пока ничего не открывает (под будущий попап с доп-настройками),
-// но уже кликабельна и анимирует hover/press, чтобы не доделывать дважды.
+struct PopupState {
+    bool    open  = false;                 // целевое состояние
+    float   alpha = 0.f;                   // 0..1, меняется плавно
+    ImGuiID id    = 0;                     // id кнопки-точек тумблера-владельца
+    char    title[64] = {0};
+    ImVec2  anchor = ImVec2(0, 0);         // куда ставить левый верх попапа
+    ImRect  dots_rect;
+    ImVec2  pos  = ImVec2(0, 0);           // фактический прямоугольник с прошлого кадра
+    ImVec2  size = ImVec2(0, 0);
+    int     submitted_frame = -1;
+    int     opened_frame    = -1;
+    ImGuiID last_toggle_id  = 0;           // последний Toggle с точками (для BeginTogglePopup)
+    ImDrawList* draw_list = nullptr;
+    int     draw_list_frame = -1;
+};
+inline PopupState& Popup() { static PopupState s; return s; }
+
+inline float Eased(float a) { a = ImClamp(a, 0.f, 1.f); return a * a * (3.f - 2.f * a); }
+
+inline ImVec4 Lerp4(const ImVec4& a, const ImVec4& b, float t)
+{
+    return ImVec4(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, a.w + (b.w - a.w) * t);
+}
+
+// 0 = выкл, 1 = вкл; анимация хранится по ImGui ID, на первом показе сразу в целевом состоянии
+inline float SwitchAnim(ImGuiID id, bool on)
+{
+    static std::unordered_map<ImGuiID, float> s_anim;
+    const float target = on ? 1.f : 0.f;
+    auto it = s_anim.find(id);
+    if (it == s_anim.end()) it = s_anim.emplace(id, target).first;
+    float& t = it->second;
+    const float dt = ImGui::GetIO().DeltaTime;
+    if (dt > 0.f) t += (target - t) * ImMin(dt * 14.f, 1.f);
+    else          t = target;
+    if (ImFabs(t - target) < 0.001f) t = target;
+    return t;
+}
+
+// Сам переключатель: тёмный трек и серая ручка выключено, светлый трек и тёмная ручка включено
+inline void DrawSwitch(ImDrawList* dl, const ImRect& bb, float t, bool hovered)
+{
+    const float h = bb.GetHeight();
+    const float r = h * 0.5f;
+    ImVec4 track = Lerp4(ImVec4(0.16f, 0.16f, 0.16f, 0.92f), ImVec4(0.82f, 0.82f, 0.82f, 0.95f), t);
+    const ImVec4 knob = Lerp4(ImVec4(0.55f, 0.55f, 0.55f, 1.f), ImVec4(0.14f, 0.14f, 0.14f, 1.f), t);
+    if (hovered) track.w = ImMin(track.w + 0.05f, 1.f);
+
+    dl->AddRectFilled(bb.Min, bb.Max, ImGui::GetColorU32(track), r);
+    dl->AddRect(bb.Min, bb.Max, ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.28f)), r, 0, 1.f);
+
+    const float knob_r  = r - ImMax(2.f, h * 0.12f);
+    const float travel  = bb.GetWidth() - h;
+    dl->AddCircleFilled(ImVec2(bb.Min.x + r + travel * t, bb.Min.y + r), knob_r, ImGui::GetColorU32(knob), 24);
+}
+
+inline ImVec2 PopupAnchorFor(const ImRect& dots)
+{
+    // чуть ниже и правее точек
+    return ImVec2(dots.Min.x + dots.GetWidth() * 0.45f, dots.Max.y + ImGui::GetFontSize() * 0.35f);
+}
+
+inline void RequestPopup(ImGuiID id, const char* label, const ImRect& dots_bb)
+{
+    PopupState& P = Popup();
+    if (P.open && P.id == id) { P.open = false; return; }   // повторный тап по точкам закрывает
+    P.open = true;
+    P.id   = id;
+    const char* end = ImGui::FindRenderedTextEnd(label);
+    ImStrncpy(P.title, label, ImMin((size_t)(end - label) + 1, sizeof(P.title)));
+    P.dots_rect = dots_bb;
+    P.anchor = PopupAnchorFor(dots_bb);
+    P.opened_frame = ImGui::GetFrameCount();
+}
+
+} // namespace detail
+
+// Тумблер. show_dots = true добавляет кнопку из трёх точек, она открывает попап
+// (см. Glass::BeginTogglePopup в GlassPopup.h). Нажатие на текст тоже переключает.
 inline bool Toggle(const char* label, bool* v, bool show_dots = false)
 {
     ImGuiWindow* window = ImGui::GetCurrentWindow();
     if (window->SkipItems) return false;
 
-    ImGuiContext& g = *ImGui::GetCurrentContext();
-    const ImGuiStyle& style = g.Style;
+    const ImGuiStyle& style = ImGui::GetStyle();
     const ImGuiID id = window->GetID(label);
     const ImVec2 label_size = ImGui::CalcTextSize(label, nullptr, true);
 
-    const float toggle_h = ImGui::GetFrameHeight();
-    const float toggle_w = toggle_h * 1.8f;
-    const float radius   = toggle_h * 0.5f;
-
+    const float h = ImGui::GetFrameHeight();
+    const float w = h * 1.8f;
     const ImVec2 pos = window->DC.CursorPos;
-    const ImRect toggle_bb(pos, ImVec2(pos.x + toggle_w, pos.y + toggle_h));
 
-    float total_w = toggle_w;
-    if (label_size.x > 0.0f) total_w += style.ItemInnerSpacing.x + label_size.x;
+    const float main_w = w + (label_size.x > 0.f ? style.ItemInnerSpacing.x + label_size.x : 0.f);
+    const ImRect sw_bb(pos, ImVec2(pos.x + w, pos.y + h));
+    const ImRect main_bb(pos, ImVec2(pos.x + main_w, pos.y + h));
 
-    // место под кнопку с точками считается ДО ItemSize, чтобы войти в total_bb
-    const float dots_w = toggle_h;                 // квадратная кнопка высотой с тумблер
-    const float dots_gap = style.ItemInnerSpacing.x;
     ImRect dots_bb;
+    float total_w = main_w;
     if (show_dots) {
-        dots_bb = ImRect(ImVec2(pos.x + total_w + dots_gap, pos.y),
-                          ImVec2(pos.x + total_w + dots_gap + dots_w, pos.y + toggle_h));
-        total_w += dots_gap + dots_w;
+        const float gap = style.ItemInnerSpacing.x;
+        dots_bb = ImRect(ImVec2(pos.x + main_w + gap, pos.y), ImVec2(pos.x + main_w + gap + h, pos.y + h));
+        total_w = main_w + gap + h;
     }
+    ImGui::ItemSize(ImVec2(total_w, h), style.FramePadding.y);
 
-    const ImRect total_bb(pos, ImVec2(pos.x + total_w, pos.y + ImMax(label_size.y, toggle_h) + style.FramePadding.y * 2.0f - toggle_h + toggle_h));
-    ImGui::ItemSize(ImRect(pos, ImVec2(pos.x + total_w, pos.y + label_size.y + style.FramePadding.y * 2.0f)), style.FramePadding.y);
-
-    bool toggle_pressed = false;
-    if (ImGui::ItemAdd(toggle_bb, id)) {
+    bool pressed = false;
+    if (ImGui::ItemAdd(main_bb, id)) {
         bool hovered, held;
-        toggle_pressed = ImGui::ButtonBehavior(toggle_bb, id, &hovered, &held);
-        if (toggle_pressed) *v = !(*v);
+        pressed = ImGui::ButtonBehavior(main_bb, id, &hovered, &held);
+        if (pressed) *v = !*v;
 
-        // анимация положения ручки (0 = выкл, 1 = вкл), хранится по ImGui ID
-        static std::unordered_map<ImGuiID, float> s_anim;
-        float& t = s_anim[id];
-        const float target = *v ? 1.0f : 0.0f;
-        if (g.IO.DeltaTime > 0.0f)
-            t += (target - t) * ImMin(g.IO.DeltaTime * 14.0f, 1.0f);
-        else
-            t = target;
-        if (ImFabs(t - target) < 0.001f) t = target;
-
-        const ImVec4 track_off(0.16f, 0.16f, 0.16f, 0.92f);
-        const ImVec4 track_on (0.82f, 0.82f, 0.82f, 0.95f);
-        const ImVec4 knob_off (0.55f, 0.55f, 0.55f, 1.0f);
-        const ImVec4 knob_on  (0.14f, 0.14f, 0.14f, 1.0f);
-        const ImVec4 border_c (1.0f, 1.0f, 1.0f, 0.28f);
-
-        auto lerp4 = [](const ImVec4& a, const ImVec4& b, float x) {
-            return ImVec4(a.x + (b.x - a.x) * x, a.y + (b.y - a.y) * x,
-                           a.z + (b.z - a.z) * x, a.w + (b.w - a.w) * x);
-        };
-        ImVec4 track = lerp4(track_off, track_on, t);
-        ImVec4 knob  = lerp4(knob_off, knob_on, t);
-        if (hovered) track.w = ImMin(track.w + 0.05f, 1.0f);
-
-        ImDrawList* dl = window->DrawList;
-        dl->AddRectFilled(toggle_bb.Min, toggle_bb.Max, ImGui::ColorConvertFloat4ToU32(track), radius);
-        dl->AddRect(toggle_bb.Min, toggle_bb.Max, ImGui::ColorConvertFloat4ToU32(border_c), radius, 0, 1.0f);
-
-        const float knob_r  = radius - 2.5f;
-        const float travel  = toggle_w - toggle_h;
-        const float knob_cx = toggle_bb.Min.x + radius + travel * t;
-        const float knob_cy = toggle_bb.Min.y + radius;
-        dl->AddCircleFilled(ImVec2(knob_cx, knob_cy), knob_r, ImGui::ColorConvertFloat4ToU32(knob), 20);
-
-        if (label_size.x > 0.0f)
-            ImGui::RenderText(ImVec2(toggle_bb.Max.x + style.ItemInnerSpacing.x, toggle_bb.Min.y + style.FramePadding.y), label);
+        detail::DrawSwitch(window->DrawList, sw_bb, detail::SwitchAnim(id, *v), hovered);
+        if (label_size.x > 0.f)
+            ImGui::RenderText(ImVec2(sw_bb.Max.x + style.ItemInnerSpacing.x, pos.y + style.FramePadding.y), label);
     }
 
     if (show_dots) {
-        const ImGuiID dots_id = window->GetID((void*)((char*)nullptr + id + 1)); // стабильный отдельный id от toggle_id
+        detail::PopupState& P = detail::Popup();
+        const ImGuiID dots_id = ImHashStr("##dots", 0, id);
+        P.last_toggle_id = dots_id;
+        if (P.id == dots_id) {                      // попап следует за тумблером, если меню двигают
+            P.dots_rect = dots_bb;
+            P.anchor = detail::PopupAnchorFor(dots_bb);
+        }
         if (ImGui::ItemAdd(dots_bb, dots_id)) {
-            bool d_hover, d_held;
-            // кнопка кликабельна и анимируется, но ничего не делает — место под будущий попап
-            ImGui::ButtonBehavior(dots_bb, dots_id, &d_hover, &d_held);
+            bool d_hov, d_held;
+            const bool dots_pressed = ImGui::ButtonBehavior(dots_bb, dots_id, &d_hov, &d_held);
 
-            ImU32 dots_bg = ImGui::ColorConvertFloat4ToU32(
-                d_held  ? ImVec4(1.f, 1.f, 1.f, 0.22f) :
-                d_hover ? ImVec4(1.f, 1.f, 1.f, 0.14f) :
-                          ImVec4(1.f, 1.f, 1.f, 0.07f));
             ImDrawList* dl = window->DrawList;
-            dl->AddRectFilled(dots_bb.Min, dots_bb.Max, dots_bg, radius * 0.6f);
-            dl->AddRect(dots_bb.Min, dots_bb.Max, ImGui::ColorConvertFloat4ToU32(ImVec4(1.f,1.f,1.f,0.20f)), radius * 0.6f, 0, 1.0f);
+            const float rr = h * 0.3f;
+            const ImVec4 bg = d_held ? ImVec4(1.f, 1.f, 1.f, 0.22f)
+                            : d_hov  ? ImVec4(1.f, 1.f, 1.f, 0.14f)
+                                     : ImVec4(1.f, 1.f, 1.f, 0.07f);
+            dl->AddRectFilled(dots_bb.Min, dots_bb.Max, ImGui::GetColorU32(bg), rr);
+            dl->AddRect(dots_bb.Min, dots_bb.Max, ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.22f)), rr, 0, 1.f);
 
             const ImVec2 c = dots_bb.GetCenter();
-            const float r = 1.6f;
-            const float sp = 5.5f;
-            ImU32 dot_col = ImGui::ColorConvertFloat4ToU32(ImVec4(1.f, 1.f, 1.f, 0.85f));
-            dl->AddCircleFilled(ImVec2(c.x - sp, c.y), r, dot_col, 12);
-            dl->AddCircleFilled(ImVec2(c.x,      c.y), r, dot_col, 12);
-            dl->AddCircleFilled(ImVec2(c.x + sp, c.y), r, dot_col, 12);
+            const float dr = ImMax(1.5f, h * 0.075f);
+            const float sp = h * 0.26f;
+            for (int i = -1; i <= 1; ++i)
+                dl->AddCircleFilled(ImVec2(c.x + sp * (float)i, c.y), dr, ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.85f)), 12);
+
+            if (dots_pressed) detail::RequestPopup(dots_id, label, dots_bb);
         }
     }
-
-    return toggle_pressed;
+    return pressed;
 }
 
 } // namespace Glass

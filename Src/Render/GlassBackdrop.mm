@@ -3,6 +3,7 @@
 static const int kSlots = 3;
 static UIVisualEffectView *g_views[kSlots];
 static CAGradientLayer    *g_grads[kSlots];
+static UIVisualEffectView *g_popupView;
 
 void GlassBackdrop_Install(UIView *host, UIView *below) {
     for (int i = 0; i < kSlots; i++) {
@@ -41,5 +42,28 @@ void GlassBackdrop_Set(int slot, CGRect f, CGFloat r, bool visible) {
         g_grads[slot].frame = v.bounds;
     }
     if (v.layer.cornerRadius != r) v.layer.cornerRadius = r;
+    [CATransaction commit];
+}
+
+void GlassBackdrop_InstallPopup(UIView *host, UIView *above) {
+    UIBlurEffect *fx = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterialDark];
+    g_popupView = [[UIVisualEffectView alloc] initWithEffect:fx];
+    g_popupView.userInteractionEnabled = NO;
+    g_popupView.clipsToBounds = YES;
+    g_popupView.layer.cornerCurve = kCACornerCurveContinuous;
+    g_popupView.hidden = YES;
+    [host insertSubview:g_popupView aboveSubview:above];
+}
+
+void GlassBackdrop_SetPopup(CGRect f, CGFloat r, CGFloat alpha) {
+    if (!g_popupView) return;
+    if (alpha < 0.01 || f.size.width < 1 || f.size.height < 1) { g_popupView.hidden = YES; return; }
+
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    g_popupView.hidden = NO;
+    g_popupView.alpha = alpha;                    // плавное появление и исчезновение блюра
+    if (!CGRectEqualToRect(g_popupView.frame, f)) g_popupView.frame = f;
+    if (g_popupView.layer.cornerRadius != r) g_popupView.layer.cornerRadius = r;
     [CATransaction commit];
 }
