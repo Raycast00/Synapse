@@ -64,7 +64,8 @@ namespace
         void *mTeam{}, *mIsAlive{}, *mHealth{}, *mLookXLimit{};
         void *kSMR{}, *mGetBones{};
         void *kArms{}, *mShoot{}, *mCanShoot{};
-        void *kPhysics{}, *mLinecast{};
+        void *kSourceTrace{}, *fMask{};
+        void *kBulletTrace{}, *mClearNearby{}, *mHardBlocked{};
     } A;
 
     bool ResolveApi()
@@ -85,12 +86,11 @@ namespace
         A.mShoot    = il::Method(A.kArms, "Shoot", 0);
         A.mCanShoot = il::Method(A.kArms, "get_CanShoot", 0);
 
-        const char* physAsms[] = { "UnityEngine.PhysicsModule", "UnityEngine", "UnityEngine.CoreModule" };
-        for (const char* asmName : physAsms) {
-            A.kPhysics = il::Class("UnityEngine", "Physics", asmName);
-            if (A.kPhysics) break;
-        }
-        A.mLinecast = A.kPhysics ? il::Method(A.kPhysics, "Linecast", 2) : nullptr;
+        A.kSourceTrace = il::Class("", "SourceTrace", "Assembly-CSharp");
+        A.fMask        = A.kSourceTrace ? il::Field(A.kSourceTrace, "Mask") : nullptr;
+        A.kBulletTrace = il::Class("ScarletWork.Hit", "BulletTrace", "Assembly-CSharp");
+        A.mClearNearby = il::Method(A.kBulletTrace, "ClearNearby", 2);
+        A.mHardBlocked = il::Method(A.kBulletTrace, "HardBlocked", 3);
 
         void* kComponent  = il::Class("UnityEngine", "Component", core);
         void* kGameObject = il::Class("UnityEngine", "GameObject", core);
@@ -354,51 +354,28 @@ namespace
 
     enum class LOS { Clear, ThinWall, Blocked };
 
-    // Реальный физический линкаст вместо ненадёжного PC_HiddenMask-бита. Physics.Linecast(Vector3,Vector3) —
-    // двухаргументный булевый оверлоад, выбран намеренно уникальным по числу параметров (см. объяснение выше).
-    bool Blocked(const V3& a, const V3& b)
-    {
-        if (!A.mLinecast) return false;
-        V3 start = a, end = b;
-        void* args[2] = { &start, &end };
-        void* r = il::Invoke(A.mLinecast, nullptr, args);
-        if (!il::ValidPtr((uintptr_t)r)) return false;
-        return *((uint8_t*)r + 0x10) != 0;
-    }
-
-    // Эвристика толщины стены — НАША оценка через серию коротких линкастов, не настоящее правило игры
-    // (PassesWalls приватный, тело не декомпилировано). step/maxProbe/thicknessLimit — подобрать в игре.
+    // Настоящие трейсы игры (dump.cs: ScarletWork.Hit.BulletTrace, SourceTrace.Mask) вместо
+    // Unity Physics.Linecast — тот в этом билде, похоже, не используется и вырезан линкером.
     LOS CheckWallbang(const V3& eye, const V3& target)
     {
-        V3 d{ target.x - eye.x, target.y - eye.y, target.z - eye.z };
-        float dist = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
-        if (dist < 0.3f) return LOS::Clear;
-        float inv = 1.f / dist;
-        V3 dir{ d.x * inv, d.y * inv, d.z * inv };
+        if (!A.mClearNearby) return LOS::Clear; // API не резолвился — не блокируем вслепую
 
-        float stopAt = std::max(0.f, dist - 0.15f); // не упираемся в коллайдер самой цели
-        constexpr float step = 0.25f;
-        constexpr float maxProbe = 3.0f;
-        constexpr float thicknessLimit = 0.6f; // метров, требует подбора под реальные стены игры
-
-        V3 clearEnd{ eye.x + dir.x * stopAt, eye.y + dir.y * stopAt, eye.z + dir.z * stopAt };
-        if (!Blocked(eye, clearEnd)) return LOS::Clear;
-
-        float t = 0.f, enterT = -1.f;
-        float probeMax = std::min(stopAt, maxProbe);
-        while (t < probeMax) {
-            float segEnd = std::min(t + step, probeMax);
-            V3 p0{ eye.x + dir.x * t,      eye.y + dir.y * t,      eye.z + dir.z * t };
-            V3 p1{ eye.x + dir.x * segEnd, eye.y + dir.y * segEnd, eye.z + dir.z * segEnd };
-            bool segBlocked = Blocked(p0, p1);
-            if (segBlocked && enterT < 0.f) enterT = t;
-            if (!segBlocked && enterT >= 0.f) {
-                float thickness = t - enterT;
-                return (thickness <= thicknessLimit) ? LOS::ThinWall : LOS::Blocked;
-            }
-            t = segEnd;
+        V3 from = eye, to = target;
+        void* a2[2] = { &from, &to };
+        bool clear = false;
+        {
+            void* r = il::Invoke(A.mClearNearby, nullptr, a2);
+            if (il::ValidPtr((uintptr_t)r)) clear = *((uint8_t*)r + 0x10) != 0;
         }
-        return LOS::Blocked; // не вышла из стены в пределах maxProbe — считаем сплошной
+        if (clear) return LOS::Clear;
+
+        if (!A.mHardBlocked) return LOS::Blocked;
+
+        int mask = A.fMask ? il::StaticField<int>(A.fMask) : -1;
+        void* a3[3] = { &from, &to, &mask };
+        void* r = il::Invoke(A.mHardBlocked, nullptr, a3);
+        bool hard = il::ValidPtr((uintptr_t)r) ? (*((uint8_t*)r + 0x10) != 0) : true;
+        return hard ? LOS::Blocked : LOS::ThinWall;
     }
 
     static float s_lastHeadY = 0.f;
@@ -663,11 +640,11 @@ namespace
 
         int bestMask = best ? il::Read<int>(best->pc + Cfg::PC_HiddenMask) : -1;
         std::snprintf(st, sizeof st,
-            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d wt=%d phys=%d | eY=%.1f eP=%.1f %s | headSrc=%s mask=0x%X headY=%.2f dY=%+.2f | silent=%s",
+            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d wt=%d trace=%d | eY=%.1f eP=%.1f %s | headSrc=%s mask=0x%X headY=%.2f dY=%+.2f | silent=%s",
             W.nPc, (int)W.cands.size(), inFov, best ? 1 : 0, (int)(W.lockedPc != 0),
             overriding ? 1 : 0,
             aim::aim_through_walls ? 1 : 0,
-            A.mLinecast != nullptr,
+            A.mClearNearby != nullptr && A.mHardBlocked != nullptr,
             eY, eP,
             overriding ? "OVERRIDE" : (wrote ? "writing" : "idle"),
             srcName, bestMask, best ? bestPos.y : 0.f, headYDelta,
