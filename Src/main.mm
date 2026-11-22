@@ -291,6 +291,10 @@ static bool   g_tLeave = false;
             if (ImGui::BeginTabItem("Inventory"))
             {
                 inventory::draw_tab();
+
+                inventory::AddContainer("Butterfly Knife , test, asdadsadsasdads", "Gamma Dopler Emerald", "Legendary", IM_COL32(255, 196, 64, 255));
+                inventory::AddContainer("Butterfly Knife", "Lore",  "Epic",      IM_COL32(160, 110, 255, 255));
+
                 ImGui::EndTabItem();
             }
 
@@ -314,6 +318,8 @@ static bool   g_tLeave = false;
         g_menuRect = CGRectZero;
         GlassBackdrop_Set(1, CGRectZero, 0, false);
     }
+
+    inventory::end_frame();
 
     ImGui::Render();
     id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
