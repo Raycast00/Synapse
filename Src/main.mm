@@ -147,6 +147,11 @@ static PopupLayerView *g_popupLayer;
 
     ApplyGlassStyle();   // стеклянный стиль, перекрывает цвета и скругления выше
 
+    // Шрифты добавляем один раз. Массивы статические, поэтому atlas не должен их освобождать.
+    ImFontConfig font_cfg;
+    font_cfg.FontDataOwnedByAtlas = false;
+    ImGui::GetIO().Fonts->AddFontFromMemoryTTF(Regular, sizeof(Regular), 16.f, &font_cfg);
+
     ImGui_ImplMetal_Init(dev);
     return self;
 }
@@ -170,7 +175,6 @@ static PopupLayerView *g_popupLayer;
     if (!rpd) return;
 
     ImGuiIO &io = ImGui::GetIO();
-    io.Fonts->AddFontFromMemoryTTF(Regular, sizeof(Regular), 16.f);
     io.DisplaySize = ImVec2(view.bounds.size.width, view.bounds.size.height);
     CGFloat s = view.window.screen.scale ?: 3.0;
     io.DisplayFramebufferScale = ImVec2(s, s);
