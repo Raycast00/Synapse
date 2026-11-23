@@ -28,8 +28,8 @@ static bool   g_checkbox = false;
 
 // Демо-состояние для попапа Box: пока ни с чем не связано, заменишь на поля из visuals::
 static bool s_demo_fill = false, s_demo_glow = false, s_demo_transparent = false, s_demo_overlay = false;
-static bool s_demo_dd[2] = { false, false };
-static const char* s_demo_dd_items[2] = { "Selection 1", "Selection 2" };
+static bool sel[3] = { false, false, false };
+static const char* items[3] = { "Head", "Chest", "Legs" };
 
 // touch state: клик уходит в imgui через кадр после hover
 static ImVec2 g_tPos = ImVec2(-FLT_MAX, -FLT_MAX);
@@ -454,7 +454,7 @@ static PopupLayerView *g_popupLayer;
         g_ddPopup.CmdLists.resize(0); g_ddPopup.CmdListsCount = 0; g_ddPopup.TotalVtxCount = 0; g_ddPopup.TotalIdxCount = 0;
         for (int i = 0; i < dd->CmdLists.Size; ++i) {
             ImDrawList *l = dd->CmdLists[i];
-            ImDrawData &dst = (l == pv.draw_list) ? g_ddPopup : g_ddMenu;
+            ImDrawData &dst = (l == pv.draw_list || l == pv.draw_list2) ? g_ddPopup : g_ddMenu;
             dst.CmdLists.push_back(l);
             dst.CmdListsCount++;
             dst.TotalVtxCount += l->VtxBuffer.Size;
