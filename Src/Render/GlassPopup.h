@@ -1,10 +1,12 @@
 #pragma once
 #include "GlassWidgets.h"
+#include <string>
 
 namespace Glass {
 
 // Размеры в единицах размера шрифта, чтобы попап масштабировался вместе с меню.
 struct PopupConfig {
+    // окно попапа
     float width         = 16.0f;
     float pad           = 0.8f;
     float rounding      = 1.1f;
@@ -21,6 +23,23 @@ struct PopupConfig {
     float shadow_alpha  = 0.40f;
     ImVec4 tint   = ImVec4(0.20f, 0.20f, 0.21f, 0.45f);   // цвет стекла поверх блюра
     ImVec4 border = ImVec4(1.f, 1.f, 1.f, 0.20f);
+
+    // dropdown: кнопка в строке
+    float dd_w          = 7.5f;    // ширина кнопки
+    float dd_h          = 1.8f;
+    float dd_round      = 0.5f;
+    float dd_pad_x      = 0.7f;
+    float dd_arrow_zone = 2.0f;    // место справа под стрелку
+    float dd_fade_len   = 1.6f;    // длина растворения текста
+    // dropdown: список
+    float list_pad_x      = 0.8f;
+    float list_pad_y      = 0.5f;
+    float list_item_h     = 2.1f;
+    float list_shift      = 1.4f;  // на сколько текст уезжает вправо под стрелку
+    float list_round      = 1.0f;
+    float list_open_scale = 0.90f; // с какого масштаба список «выскакивает»
+    float list_anim       = 0.18f; // секунд
+    ImVec4 list_tint = ImVec4(0.30f, 0.30f, 0.31f, 0.93f);
 };
 inline PopupConfig& PopupCfg() { static PopupConfig c; return c; }
 
@@ -31,13 +50,159 @@ struct PopupVisual {
     ImVec2 size = ImVec2(0, 0);
     float  rounding = 0.f;
     float  alpha = 0.f;                 // уже со сглаживанием
-    ImDrawList* draw_list = nullptr;    // draw list окна попапа
+    ImDrawList* draw_list  = nullptr;   // окно попапа
+    ImDrawList* draw_list2 = nullptr;   // окно списка dropdown, если он виден
 };
 
 namespace detail {
-struct SectionState { ImVec2 min = ImVec2(0, 0); int rows = 0; int count = 0; };
+
+struct SectionState { ImVec2 min = ImVec2(0, 0); int count = 0; };
 inline SectionState& Section() { static SectionState s; return s; }
+
+struct DropdownState {
+    ImGuiID id = 0;                     // id кнопки, которой принадлежит список
+    bool    open  = false;              // целевое состояние
+    float   alpha = 0.f;                // 0..1
+    bool    blocking = false;           // снимок open на начало кадра: пока true, остальные виджеты попапа не реагируют
+    int     opened_frame = -1;
+    int     submitted_frame = -1;
+    ImVec2  rect_min = ImVec2(0, 0);    // фактический (масштабированный) прямоугольник списка с прошлого кадра
+    ImVec2  rect_max = ImVec2(0, 0);
+    ImDrawList* draw_list = nullptr;
+    int     draw_list_frame = -1;
+};
+inline DropdownState& Dropdown() { static DropdownState s; return s; }
+
+inline void DropdownReset()
+{
+    DropdownState& D = Dropdown();
+    D.open = false; D.alpha = 0.f; D.id = 0; D.blocking = false;
 }
+
+// Список dropdown: отдельное окно без фона, все рисуется вручную и масштабируется вокруг pivot.
+inline bool DropdownList(ImGuiID id, const ImRect& box, bool* selected, const char* const* items, int count, bool multi)
+{
+    DropdownState& D = Dropdown();
+    PopupState& P = Popup();
+    const PopupConfig& C = PopupCfg();
+    ImGuiIO& io = ImGui::GetIO();
+    const int frame = ImGui::GetFrameCount();
+
+    if (!P.open) D.open = false;       // попап закрывается, список вместе с ним
+
+    // тап мимо списка (по отпусканию) закрывает только список; кадр открытия пропускаем
+    if (D.open && D.opened_frame != frame && D.rect_max.x > D.rect_min.x && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+        const ImRect r(D.rect_min, D.rect_max);
+        if (!r.Contains(io.MousePos)) D.open = false;
+    }
+    D.alpha = ImClamp(D.alpha + (D.open ? 1.f : -1.f) * io.DeltaTime / C.list_anim, 0.f, 1.f);
+    if (!D.open && D.alpha <= 0.f) { D.id = 0; return false; }
+    D.submitted_frame = frame;
+
+    const float u = ImGui::GetFontSize();
+    const float t = Eased(D.alpha);
+    const float s = C.list_open_scale + (1.f - C.list_open_scale) * t;
+
+    // раскладка без масштаба
+    const float pad_x  = C.list_pad_x * u;
+    const float pad_y  = C.list_pad_y * u;
+    const float item_h = C.list_item_h * u;
+    const float shift  = C.list_shift * u;
+    float max_tw = 0.f;
+    for (int i = 0; i < count; ++i) max_tw = ImMax(max_tw, ImGui::CalcTextSize(items[i]).x);
+    const float W = ImMax(box.GetWidth() + 0.6f * u, pad_x * 2.f + max_tw + shift);
+    const float H = pad_y * 2.f + item_h * (float)count;
+
+    // список накрывает кнопку: первая строка встаёт на уровень кнопки, правый край чуть правее кнопки
+    ImVec2 p0(box.Max.x + 0.3f * u - W, box.GetCenter().y - pad_y - item_h * 0.5f);
+    const float margin = 0.5f * u;
+    p0.x = ImClamp(p0.x, margin, ImMax(margin, io.DisplaySize.x - margin - W));
+    p0.y = ImClamp(p0.y, margin, ImMax(margin, io.DisplaySize.y - margin - H));
+    const ImVec2 p1(p0.x + W, p0.y + H);
+
+    const ImVec2 pivot(box.Max.x, box.GetCenter().y);
+    auto T = [&](const ImVec2& p) { return ImVec2(pivot.x + (p.x - pivot.x) * s, pivot.y + (p.y - pivot.y) * s); };
+    const ImVec2 q0 = T(p0), q1 = T(p1);
+    D.rect_min = q0;
+    D.rect_max = q1;
+
+    ImGui::SetNextWindowPos(q0, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(q1.x - q0.x, q1.y - q0.y), ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * t);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.f, 0.f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.f);
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.f, 0.f));
+
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                             ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse |
+                             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoNav |
+                             ImGuiWindowFlags_NoFocusOnAppearing;
+    if (!D.open) flags |= ImGuiWindowFlags_NoInputs;     // пока исчезает, тапы не принимаем
+
+    ImGui::Begin("##glass_dropdown", nullptr, flags);
+    ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());   // над окном попапа
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float rd = C.list_round * u * s;
+
+    // тень и фон списка
+    dl->PushClipRectFullScreen();
+    for (int i = 1; i <= 8; ++i) {
+        const float k = 1.f - (float)i / 9.f;
+        dl->AddRect(ImVec2(q0.x - i, q0.y - i), ImVec2(q1.x + i, q1.y + i),
+                    ImGui::GetColorU32(ImVec4(0.f, 0.f, 0.f, 0.35f * k * k)), rd + (float)i, 0, 1.5f);
+    }
+    dl->AddRectFilled(q0, q1, ImGui::GetColorU32(C.list_tint), rd);
+    dl->AddRect(q0, q1, ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.20f)), rd, 0, 1.f);
+    dl->PopClipRect();
+
+    // пункты
+    bool changed = false;
+    ImFont* font = ImGui::GetFont();
+    const float fsz = ImGui::GetFontSize() * s;
+    for (int i = 0; i < count; ++i) {
+        const ImVec2 r0(p0.x, p0.y + pad_y + item_h * (float)i);
+        const ImVec2 r1(p1.x, r0.y + item_h);
+        const ImRect rb(T(r0), T(r1));
+        const ImGuiID iid = ImHashData(&i, sizeof(i), id);
+
+        bool hov = false, held = false;
+        if (ImGui::ItemAdd(rb, iid) && D.open) {
+            if (ImGui::ButtonBehavior(rb, iid, &hov, &held)) {
+                if (multi) selected[i] = !selected[i];
+                else       for (int k = 0; k < count; ++k) selected[k] = (k == i);
+                changed = true;
+            }
+        }
+        if (hov || held) {
+            const float inset = 0.35f * u * s;
+            dl->AddRectFilled(ImVec2(q0.x + inset, rb.Min.y), ImVec2(q1.x - inset, rb.Max.y),
+                              ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, held ? 0.10f : 0.06f)), 0.5f * u * s);
+        }
+
+        const float sh = SwitchAnim(iid, selected[i]);          // 0..1: сдвиг текста и появление стрелки
+        const float cy = (r0.y + r1.y) * 0.5f;
+        const ImVec2 tp = T(ImVec2(p0.x + pad_x + sh * shift, cy - ImGui::GetTextLineHeight() * 0.5f));
+        dl->AddText(font, fsz, tp, ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.95f)), items[i]);
+
+        if (sh > 0.01f) {
+            const float ax = p0.x + pad_x + 0.28f * u;
+            const float aw = 0.2f * u, ah = 0.3f * u;
+            const ImVec2 pts[3] = { T(ImVec2(ax - aw, cy - ah)), T(ImVec2(ax + aw, cy)), T(ImVec2(ax - aw, cy + ah)) };
+            dl->AddPolyline(pts, 3, ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.95f * sh)),
+                            ImDrawFlags_None, ImMax(1.5f, u * 0.12f) * s);
+        }
+    }
+
+    D.draw_list = dl;
+    D.draw_list_frame = frame;
+    ImGui::End();
+    ImGui::PopStyleVar(5);
+    return changed;
+}
+
+} // namespace detail
 
 // true, пока попап открыт: тогда оверлей ловит тапы по всему экрану, чтобы тап мимо закрывал попап
 inline bool PopupCapturesInput()
@@ -51,6 +216,7 @@ inline bool PopupCapturesInput()
 inline bool BeginTogglePopup()
 {
     detail::PopupState& P = detail::Popup();
+    detail::DropdownState& D = detail::Dropdown();
     const PopupConfig& C = PopupCfg();
     ImGuiIO& io = ImGui::GetIO();
 
@@ -61,8 +227,12 @@ inline bool BeginTogglePopup()
     P.alpha = ImClamp(P.alpha + (P.open ? 1.f : -1.f) * io.DeltaTime / C.fade_time, 0.f, 1.f);
     if (!P.open && P.alpha <= 0.f) { P.id = 0; return false; }
 
-    // тап мимо попапа (по отпусканию) закрывает; кадр открытия пропускаем, иначе тот же тап закроет попап
-    if (P.open && P.size.x > 0.f && P.opened_frame != frame && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+    // пока открыт список dropdown, остальные виджеты попапа тапы не принимают
+    D.blocking = D.open;
+
+    // тап мимо попапа (по отпусканию) закрывает; кадр открытия пропускаем, иначе тот же тап закроет попап;
+    // пока открыт список dropdown, тап закрывает сначала его
+    if (P.open && !D.open && P.size.x > 0.f && P.opened_frame != frame && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
         const ImRect r(P.pos, ImVec2(P.pos.x + P.size.x, P.pos.y + P.size.y));
         if (!r.Contains(io.MousePos)) P.open = false;
     }
@@ -120,14 +290,13 @@ inline bool BeginPopupSection()
     detail::SectionState& S = detail::Section();
     const float u = ImGui::GetFontSize();
     if (S.count > 0) ImGui::Dummy(ImVec2(1.f, C.section_gap * u));
-    S.min  = ImGui::GetCursorScreenPos();
-    S.rows = 0;
+    S.min = ImGui::GetCursorScreenPos();
     ImGui::Dummy(ImVec2(1.f, C.section_pad_y * u));
     return true;
 }
 
-// Строка в секции: название слева, переключатель справа, между строками тонкая линия.
-// Нажатие работает по всей строке.
+// Строка в секции: название слева, переключатель справа. Нажатие работает по всей строке.
+// Линии между строками ставятся вручную через Glass::PopupSeparator().
 inline bool PopupToggle(const char* label, bool* v)
 {
     ImGuiWindow* window = ImGui::GetCurrentWindow();
@@ -148,9 +317,11 @@ inline bool PopupToggle(const char* label, bool* v)
 
     bool pressed = false;
     if (ImGui::ItemAdd(bb, id)) {
-        bool hovered, held;
-        pressed = ImGui::ButtonBehavior(bb, id, &hovered, &held);
-        if (pressed) *v = !*v;
+        bool hovered = false, held = false;
+        if (!detail::Dropdown().blocking) {          // пока открыт список dropdown, строки не реагируют
+            pressed = ImGui::ButtonBehavior(bb, id, &hovered, &held);
+            if (pressed) *v = !*v;
+        }
 
         ImDrawList* dl = window->DrawList;
         const char* end = ImGui::FindRenderedTextEnd(label);
@@ -164,6 +335,8 @@ inline bool PopupToggle(const char* label, bool* v)
     return pressed;
 }
 
+// Тонкая линия на всю ширину секции. Занимает по высоте ровно толщину линии (1 px),
+// так что секция по-прежнему подгоняется под содержимое автоматически.
 inline void PopupSeparator()
 {
     ImGuiWindow* window = ImGui::GetCurrentWindow();
@@ -178,7 +351,99 @@ inline void PopupSeparator()
     ImGui::Dummy(ImVec2(inner_w, 1.f));
     window->DrawList->AddLine(ImVec2(pos.x + inset,           pos.y + 0.5f),
                               ImVec2(pos.x + inner_w - inset, pos.y + 0.5f),
-    ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.14f)), 1.f);
+                              ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.14f)), 1.f);
+}
+
+// Строка с выпадающим списком: название слева, кнопка справа.
+// selected[i] = выбран ли пункт i. multi = true: можно выбрать несколько (тап по выбранному снимает выбор),
+// multi = false: выбор одного. Возвращает true в кадре, когда выбор изменился.
+// label должен быть уникальным среди строк попапа (при совпадении текста добавляй "##что-то").
+inline bool PopupDropdown(const char* label, bool* selected, const char* const* items, int count, bool multi = true)
+{
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    if (window->SkipItems || !selected || !items || count <= 0) return false;
+
+    const PopupConfig& C = PopupCfg();
+    detail::DropdownState& D = detail::Dropdown();
+    const int frame = ImGui::GetFrameCount();
+    const float u       = ImGui::GetFontSize();
+    const float inner_w = (C.width - 2.f * C.pad) * u;
+    const float row_h   = C.row_h * u;
+    const float px      = C.section_pad_x * u;
+    const ImGuiID id    = window->GetID(label);
+
+    const ImVec2 pos = window->DC.CursorPos;
+    const ImRect row(pos, ImVec2(pos.x + inner_w, pos.y + row_h));
+    ImGui::ItemSize(row);
+
+    const float box_w = C.dd_w * u, box_h = C.dd_h * u;
+    const ImRect box(ImVec2(row.Max.x - px - box_w, row.Min.y + (row_h - box_h) * 0.5f),
+                     ImVec2(row.Max.x - px,         row.Min.y + (row_h + box_h) * 0.5f));
+
+    ImDrawList* dl = window->DrawList;
+
+    // название слева
+    const char* lend = ImGui::FindRenderedTextEnd(label);
+    if (lend > label)
+        dl->AddText(ImVec2(row.Min.x + px, row.Min.y + (row_h - ImGui::GetTextLineHeight()) * 0.5f),
+                    ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.92f)), label, lend);
+
+    // когда открыт список, кнопка плавно гаснет под ним
+    const float box_a = 1.f - ((D.id == id) ? detail::Eased(D.alpha) : 0.f);
+
+    bool changed = false;
+    bool hovered = false, held = false;
+    if (ImGui::ItemAdd(box, id)) {
+        if (!D.blocking) {
+            if (ImGui::ButtonBehavior(box, id, &hovered, &held)) {
+                D.open = true; D.id = id; D.opened_frame = frame;
+            }
+        }
+
+        const float rr = C.dd_round * u;
+        dl->AddRectFilled(box.Min, box.Max,
+                          ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, (held ? 0.12f : hovered ? 0.09f : 0.06f) * box_a)), rr);
+        dl->AddRect(box.Min, box.Max, ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.28f * box_a)), rr, 0, 1.f);
+
+        // текст: «Select», одно имя или имена через запятую
+        std::string txt;
+        for (int i = 0; i < count; ++i)
+            if (selected[i]) { if (!txt.empty()) txt += ", "; txt += items[i]; }
+        const bool none = txt.empty();
+        if (none) txt = "Select";
+
+        const float tx0 = box.Min.x + C.dd_pad_x * u;
+        const float tx1 = box.Max.x - C.dd_arrow_zone * u;
+        const float ty  = box.GetCenter().y - ImGui::GetTextLineHeight() * 0.5f;
+        const float tw  = ImGui::CalcTextSize(txt.c_str()).x;
+
+        const int v0 = dl->VtxBuffer.Size;
+        dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(tx0, ty),
+                    ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, (none ? 0.85f : 0.95f) * box_a)), txt.c_str());
+        if (tw > tx1 - tx0) {
+            // длинный текст растворяется к концу: альфа вершин убывает до нуля у границы
+            const float fade_len = ImMax(1.f, ImMin(C.dd_fade_len * u, tx1 - tx0));
+            for (int i = v0; i < dl->VtxBuffer.Size; ++i) {
+                ImDrawVert& vtx = dl->VtxBuffer[i];
+                const float k = ImSaturate((tx1 - vtx.pos.x) / fade_len);
+                if (k >= 1.f) continue;
+                const ImU32 a = (vtx.col >> IM_COL32_A_SHIFT) & 0xFF;
+                vtx.col = (vtx.col & ~IM_COL32_A_MASK) | ((ImU32)((float)a * k) << IM_COL32_A_SHIFT);
+            }
+        }
+
+        // стрелка вниз
+        const float ax = box.Max.x - C.dd_arrow_zone * u * 0.5f, ay = box.GetCenter().y;
+        const float aw = 0.34f * u, ah = 0.18f * u;
+        const ImVec2 pts[3] = { ImVec2(ax - aw, ay - ah), ImVec2(ax, ay + ah), ImVec2(ax + aw, ay - ah) };
+        dl->AddPolyline(pts, 3, ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.92f * box_a)),
+                        ImDrawFlags_None, ImMax(1.5f, u * 0.12f));
+    }
+
+    if (D.id == id && (D.open || D.alpha > 0.f))
+        if (detail::DropdownList(id, box, selected, items, count, multi)) changed = true;
+
+    return changed;
 }
 
 inline void EndPopupSection()
@@ -253,6 +518,7 @@ inline void EndTogglePopup()
 inline PopupVisual PopupEndFrame()
 {
     detail::PopupState& P = detail::Popup();
+    detail::DropdownState& D = detail::Dropdown();
     const PopupConfig& C = PopupCfg();
     PopupVisual out;
     const int frame = ImGui::GetFrameCount();
@@ -260,14 +526,19 @@ inline PopupVisual PopupEndFrame()
     if (P.submitted_frame != frame) {
         // тумблер-владелец не нарисован (меню закрыли или сменили вкладку): закрываем сразу
         P.open = false; P.alpha = 0.f; P.id = 0;
+        detail::DropdownReset();
         return out;
     }
-    out.visible   = P.alpha > 0.f && P.size.x > 0.f && P.draw_list_frame == frame;
-    out.pos       = P.pos;
-    out.size      = P.size;
-    out.rounding  = C.rounding * ImGui::GetFontSize();
-    out.alpha     = detail::Eased(P.alpha);
-    out.draw_list = P.draw_list;
+    if (D.submitted_frame != frame && (D.open || D.alpha > 0.f))
+        detail::DropdownReset();
+
+    out.visible    = P.alpha > 0.f && P.size.x > 0.f && P.draw_list_frame == frame;
+    out.pos        = P.pos;
+    out.size       = P.size;
+    out.rounding   = C.rounding * ImGui::GetFontSize();
+    out.alpha      = detail::Eased(P.alpha);
+    out.draw_list  = P.draw_list;
+    out.draw_list2 = (D.draw_list_frame == frame && D.alpha > 0.f) ? D.draw_list : nullptr;
     return out;
 }
 

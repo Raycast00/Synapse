@@ -28,6 +28,8 @@ static bool   g_checkbox = false;
 
 // Демо-состояние для попапа Box: пока ни с чем не связано, заменишь на поля из visuals::
 static bool s_demo_fill = false, s_demo_glow = false, s_demo_transparent = false, s_demo_overlay = false;
+static bool s_demo_dd[2] = { false, false };
+static const char* s_demo_dd_items[2] = { "Selection 1", "Selection 2" };
 
 // touch state: клик уходит в imgui через кадр после hover
 static ImVec2 g_tPos = ImVec2(-FLT_MAX, -FLT_MAX);
@@ -399,6 +401,7 @@ static PopupLayerView *g_popupLayer;
                     if (Glass::BeginPopupSection())
                     {
                         Glass::PopupToggle("Blah blah blah", &miscellaneous::thirdperson_popup::blah);
+                        Glass::PopupDropdown("Bleh", sel, items, 3);
                         Glass::EndPopupSection();
                     }
                     if (Glass::BeginPopupSection())
