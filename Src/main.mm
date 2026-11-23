@@ -8,6 +8,7 @@
 #include "Features/Aim/aim.h"
 #include "Features/Rage/rage.h"
 #include "Features/Inventory/inventory.h"
+#include "Features/Miscellaneous/miscellaneous.h"
 #include "Settings/settings.h"
 
 #include "Memory/KittyInclude.hpp"
@@ -386,6 +387,28 @@ static PopupLayerView *g_popupLayer;
 
                 inventory::AddContainer("Butterfly Knife , test, asdadsadsasdads", "Gamma Dopler Emerald", "Legendary", IM_COL32(255, 196, 64, 255));
                 inventory::AddContainer("Butterfly Knife", "Lore",  "Epic",      IM_COL32(160, 110, 255, 255));
+
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("Miscellaneous"))
+            {
+                Glass::Toggle("Force Thirdperson", &miscellaneous::force_thirdperson, true);
+                if (Glass::BeginTogglePopup())
+                {
+                    if (Glass::BeginPopupSection())
+                    {
+                        Glass::PopupToggle("Blah blah blah", &miscellaneous::thirdperson_popup::blah);
+                        Glass::EndPopupSection();
+                    }
+                    if (Glass::BeginPopupSection())
+                    {
+                        Glass::PopupToggle("Disable Overhead", &miscellaneous::thirdperson_popup::disable_overhead);
+                        Glass::EndPopupSection();
+                    }
+                    Glass::EndTogglePopup();
+                }
+
 
                 ImGui::EndTabItem();
             }
