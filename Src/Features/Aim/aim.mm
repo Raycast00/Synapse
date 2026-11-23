@@ -356,11 +356,9 @@ namespace
 
     enum class LOS { Clear, ThinWall, Blocked };
 
-    // Проверка препятствия для сайлента: ClearNearby оказался ненадёжным индикатором (видимо, не
-    // полноценный лайн-чек на весь путь), поэтому решение принимает только HardBlocked —
-    // "непробиваемая преграда" по классификации самой игры (dump.cs: ScarletWork.Hit.BulletTrace,
-    // SourceTrace.Mask). ThinWall пока не возвращается (см. предупреждение в ответе) — зарезервировано
-    // на будущее, когда подключим TryStaticPath с реальным уроном вместо булевого хардблока.
+    // Проверка препятствия для сайлента: решает HardBlocked — "непробиваемая преграда" по классификации
+    // самой игры (dump.cs: ScarletWork.Hit.BulletTrace, SourceTrace.Mask). ClearNearby оказался
+    // ненадёжным и в решении не участвует, только в диагностике. ThinWall пока не возвращается.
     // rawClear/rawHard/maskOut — необязательные указатели для живой диагностики в статус-строке.
     LOS CheckWallbang(const V3& eye, const V3& target,
                        bool* rawClear = nullptr, bool* rawHard = nullptr, int* maskOut = nullptr)
@@ -394,6 +392,7 @@ namespace
     // Сайлент: пишем угол, стреляем прямым вызовом Shoot(), восстанавливаем — синхронно, без хуков.
     // Yaw крутим только на bodyTr (камера в иерархии унаследует), pitch — только на camTr локально,
     // чтобы не задваивать поворот. armsCam и TimeFired — чистая диагностика в статус-строке.
+    // Выбор цели (ближайшая к прицелу и не за стеной) делается снаружи, в AimbotFrame.
     bool SilentFire(void* camTr, void* bodyTr, const V3& eye, const Ang& cur,
                      const V3& targetPos, char* statusOut, size_t statusCap)
     {
@@ -410,6 +409,7 @@ namespace
             std::snprintf(statusOut, statusCap, "CanShoot=false"); return false;
         }
 
+        // Повторная защитная проверка стены прямо перед выстрелом (цель уже отобрана как не-заблокированная).
         LOS los = CheckWallbang(eye, targetPos);
         if (los == LOS::Blocked) {
             std::snprintf(statusOut, statusCap, "blocked (no LOS)"); return false;
@@ -461,10 +461,7 @@ namespace
         rotateLocalX(camTr, eP);
         il::Write<float>(W.lock + Cfg::PL_RotationX, origFp);
 
-        // los тут всегда LOS::Clear (Blocked уже вышел раньше) — "WB"-ветка временно недостижима,
-        // см. комментарий у CheckWallbang.
-        std::snprintf(statusOut, statusCap, "fired(%s) eY=%.1f eP=%.1f cam=%s tf=%.2f->%.2f real=%d",
-                      los == LOS::Clear ? "LOS" : "WB",
+        std::snprintf(statusOut, statusCap, "fired eY=%.1f eP=%.1f cam=%s tf=%.2f->%.2f real=%d",
                       eY, eP, !il::ValidPtr(armsCam) ? "null" : (armsCamSame ? "same" : "DIFF"),
                       tfBefore, tfAfter, realShot);
         return true;
@@ -541,7 +538,7 @@ namespace
                 int m = il::Read<int>(c.pc + Cfg::PC_HiddenMask);
                 if (!aim::aim_through_walls && (m & Cfg::HiddenByOcclusion)) return false;
             }
-            // Для сайлента видимость/вуллбанг решает реальный трейс в SilentFire, не этот бит.
+            // Для сайлента видимость/вуллбанг решает реальный трейс (HardBlocked) при выборе цели.
             if (!AimPoint(c, hitPos, src)) return false;
             if (!W2S(cam, hitPos, sx, sy, (float)sh, s)) return false;
             d = std::hypot(s.x - center.x, s.y - center.y);
@@ -551,50 +548,86 @@ namespace
         const Cand* best = nullptr; V3 bestPos{};
         HeadSrc bestSrc = HeadSrc::None;
         int inFov = 0;
+        char silentStatus[96] = "idle";
+        bool haveDiag = false; V3 diagPos{};
 
-        if (W.lockedPc) {
+        if (silentActive) {
+            // Сайлент: замок на цель отключён (он залипал на цели за стеной и глушил стрельбу по остальным).
+            // Собираем всех в FOV, сортируем по расстоянию до центра экрана (прицела) и берём ближайшую,
+            // которая не за непробиваемой стеной. Трассировка ленивая: останавливаемся на первой подходящей.
+            W.lockedPc = 0;
+            W.lostSince = -1.0;
+
+            struct SCand { const Cand* c; V3 pos; HeadSrc src; float d; };
+            std::vector<SCand> list;
             for (const Cand& c : W.cands) {
-                if (c.pc != W.lockedPc) continue;
                 ImVec2 s; float d; V3 hp; HeadSrc src;
-                if (qualifies(c, s, d, hp, src) && d < aim::fov_radius * Cfg::KeepRadiusMul) {
-                    best = &c; bestPos = hp; bestSrc = src;
-                    W.lostSince = -1.0;
-                } else if (W.lostSince < 0.0) {
-                    W.lostSince = now;
-                }
+                if (!qualifies(c, s, d, hp, src)) continue;
+                if (d >= aim::fov_radius) continue;
+                list.push_back({ &c, hp, src, d });
+            }
+            inFov = (int)list.size();
+            std::sort(list.begin(), list.end(), [](const SCand& a, const SCand& b) { return a.d < b.d; });
+
+            int blockedCnt = 0;
+            for (const SCand& sc : list) {
+                if (CheckWallbang(eye, sc.pos) == LOS::Blocked) { blockedCnt++; continue; }
+                best = sc.c; bestPos = sc.pos; bestSrc = sc.src;
                 break;
             }
-            if (!best && W.lostSince >= 0.0 && now - W.lostSince < Cfg::LoseGraceSec) {
-                // grace period
-            } else if (!best) {
-                W.lockedPc = 0;
-                W.lostSince = -1.0;
-            }
-        }
 
-        for (const Cand& c : W.cands) {
-            if (c.pc == W.lockedPc) continue;
-
-            ImVec2 s; float d; V3 hitPos; HeadSrc src;
-            if (!qualifies(c, s, d, hitPos, src)) continue;
-            if (d >= aim::fov_radius) continue;
-            inFov++;
-
+            if (!list.empty()) { haveDiag = true; diagPos = best ? bestPos : list[0].pos; }
             if (!best) {
-                best = &c;
-                bestPos = hitPos;
-                bestSrc = src;
+                if (list.empty()) std::snprintf(silentStatus, sizeof silentStatus, "no target");
+                else              std::snprintf(silentStatus, sizeof silentStatus, "all blocked (%d)", blockedCnt);
+            }
+        } else {
+            if (W.lockedPc) {
+                for (const Cand& c : W.cands) {
+                    if (c.pc != W.lockedPc) continue;
+                    ImVec2 s; float d; V3 hp; HeadSrc src;
+                    if (qualifies(c, s, d, hp, src) && d < aim::fov_radius * Cfg::KeepRadiusMul) {
+                        best = &c; bestPos = hp; bestSrc = src;
+                        W.lostSince = -1.0;
+                    } else if (W.lostSince < 0.0) {
+                        W.lostSince = now;
+                    }
+                    break;
+                }
+                if (!best && W.lostSince >= 0.0 && now - W.lostSince < Cfg::LoseGraceSec) {
+                    // grace period
+                } else if (!best) {
+                    W.lockedPc = 0;
+                    W.lostSince = -1.0;
+                }
+            }
+
+            for (const Cand& c : W.cands) {
+                if (c.pc == W.lockedPc) continue;
+
+                ImVec2 s; float d; V3 hitPos; HeadSrc src;
+                if (!qualifies(c, s, d, hitPos, src)) continue;
+                if (d >= aim::fov_radius) continue;
+                inFov++;
+
+                if (!best) {
+                    best = &c;
+                    bestPos = hitPos;
+                    bestSrc = src;
+                }
+            }
+            if (best) {
+                W.lockedPc = best->pc;
+                haveDiag = true;
+                diagPos = bestPos;
             }
         }
-        if (best) W.lockedPc = best->pc;
 
         float eY = 0.f, eP = 0.f, cmdY = 0.f;
         bool wrote = false;
-        char silentStatus[96] = "idle";
 
         if (silentActive) {
             if (best) wrote = SilentFire(camTr, bodyTr, eye, cur, bestPos, silentStatus, sizeof silentStatus);
-            else      std::snprintf(silentStatus, sizeof silentStatus, "no target");
         } else if (best && !overriding) {
             Ang des{};
             V3 dir{ bestPos.x - eye.x, bestPos.y - eye.y, bestPos.z - eye.z };
@@ -647,9 +680,9 @@ namespace
             default: break;
         }
 
-        // Живая диагностика HardBlocked/ClearNearby/Mask именно по текущей цели — см. статус-строку.
+        // Живая диагностика HardBlocked/ClearNearby/Mask по текущей (или ближайшей, если все заблокированы) цели.
         bool dCn = false, dHb = false; int dMask = -1;
-        if (best) CheckWallbang(eye, bestPos, &dCn, &dHb, &dMask);
+        if (haveDiag) CheckWallbang(eye, diagPos, &dCn, &dHb, &dMask);
 
         int bestMask = best ? il::Read<int>(best->pc + Cfg::PC_HiddenMask) : -1;
         std::snprintf(st, sizeof st,
