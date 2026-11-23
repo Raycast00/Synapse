@@ -134,7 +134,6 @@ inline bool PopupToggle(const char* label, bool* v)
     if (window->SkipItems) return false;
 
     const PopupConfig& C = PopupCfg();
-    detail::SectionState& S = detail::Section();
     const float u       = ImGui::GetFontSize();
     const float inner_w = (C.width - 2.f * C.pad) * u;
     const float row_h   = C.row_h * u;
@@ -154,11 +153,6 @@ inline bool PopupToggle(const char* label, bool* v)
         if (pressed) *v = !*v;
 
         ImDrawList* dl = window->DrawList;
-        if (S.rows > 0) {
-            const float inset = px * 0.35f;
-            dl->AddLine(ImVec2(bb.Min.x + inset, bb.Min.y), ImVec2(bb.Max.x - inset, bb.Min.y),
-                        ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.14f)), 1.f);
-        }
         const char* end = ImGui::FindRenderedTextEnd(label);
         dl->AddText(ImVec2(bb.Min.x + px, bb.Min.y + (row_h - ImGui::GetTextLineHeight()) * 0.5f),
                     ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.92f)), label, end);
@@ -167,8 +161,24 @@ inline bool PopupToggle(const char* label, bool* v)
                         ImVec2(bb.Max.x - px,        bb.Min.y + (row_h + sw_h) * 0.5f));
         detail::DrawSwitch(dl, sw, detail::SwitchAnim(id, *v), hovered);
     }
-    S.rows++;
     return pressed;
+}
+
+inline void PopupSeparator()
+{
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    if (window->SkipItems) return;
+
+    const PopupConfig& C = PopupCfg();
+    const float u       = ImGui::GetFontSize();
+    const float inner_w = (C.width - 2.f * C.pad) * u;
+    const float inset   = C.section_pad_x * u * 0.35f;
+    const ImVec2 pos    = window->DC.CursorPos;
+
+    ImGui::Dummy(ImVec2(inner_w, 1.f));
+    window->DrawList->AddLine(ImVec2(pos.x + inset,           pos.y + 0.5f),
+                              ImVec2(pos.x + inner_w - inset, pos.y + 0.5f),
+    ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.14f)), 1.f);
 }
 
 inline void EndPopupSection()
