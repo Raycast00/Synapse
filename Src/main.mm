@@ -348,14 +348,14 @@ static PopupLayerView *g_popupLayer;
                         }
                         if (Glass::BeginPopupSection())
                         {
-                            Glass::PopupDropdown("Delay Shot", aim::silent_additional::silent_delay, aim::silent_additional::silent_spread_effort, 2, false);
+                            Glass::PopupDropdown("Delay Shot", aim::silent_additional::silent_delay, aim::silent_additional::silent_delay_effort, 2, false);
 
                             Glass::EndPopupSection();
                         }
                         Glass::EndTogglePopup();
                     }
                 }
-                Glass::Toggle("Automatic Fire", &aim::automatic_fire);
+                Glass::Toggle("Aim Through Walls", &aim::aim_through_walls);
 
                 Glass::Toggle("Draw FOV", &aim::draw_fov);
                 ImGui::SameLine();
