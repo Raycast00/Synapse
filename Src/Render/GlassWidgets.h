@@ -20,6 +20,9 @@ struct PopupState {
     ImGuiID last_toggle_id  = 0;           // последний Toggle с точками (для BeginTogglePopup)
     ImDrawList* draw_list = nullptr;
     int     draw_list_frame = -1;
+    float   scale = 1.f;                 // масштаб попапа в этом кадре (анимация «выпрыгивания»)
+    ImVec2  pivot = ImVec2(0, 0);        // точка, от которой масштабируем
+    int     vtx_begin = 0;               // с какой вершины draw list попапа начинается его содержимое
 };
 inline PopupState& Popup() { static PopupState s; return s; }
 

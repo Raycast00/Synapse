@@ -19,6 +19,7 @@ struct PopupConfig {
     float row_h         = 2.3f;
     float switch_h      = 1.35f;
     float fade_time     = 0.16f;   // секунд на полное появление/исчезновение
+    float popup_open_scale = 0.90f;    // с какого масштаба попап «выпрыгивает» (как list_open_scale у списка)
     int   shadow_steps  = 10;
     float shadow_alpha  = 0.40f;
     ImVec4 tint   = ImVec4(0.20f, 0.20f, 0.21f, 0.45f);   // цвет стекла поверх блюра
@@ -58,6 +59,11 @@ namespace detail {
 
 struct SectionState { ImVec2 min = ImVec2(0, 0); int count = 0; };
 inline SectionState& Section() { static SectionState s; return s; }
+inline ImVec2 PopupXform(const ImVec2& p)
+{
+    const PopupState& P = Popup();
+    return ImVec2(P.pivot.x + (p.x - P.pivot.x) * P.scale, P.pivot.y + (P.pivot.y == P.pivot.y ? (p.y - P.pivot.y) * P.scale : 0.f));
+}
 
 struct DropdownState {
     ImGuiID id = 0;                     // id кнопки, которой принадлежит список
@@ -255,7 +261,15 @@ inline bool BeginTogglePopup()
     }
     ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
 
-    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, detail::Eased(P.alpha));
+    // «выпрыгивание»: масштаб вокруг точки на границе попапа, ближайшей к кнопке с точками.
+    // Точка лежит на границе окна, поэтому уменьшенное содержимое не выходит за его клип.
+    const float ease = detail::Eased(P.alpha);
+    P.scale = C.popup_open_scale + (1.f - C.popup_open_scale) * ease;
+    const bool flipped = (pos.y < P.anchor.y - 0.5f);
+    P.pivot = ImVec2(ImClamp(P.dots_rect.GetCenter().x, pos.x, pos.x + W),
+                     flipped ? pos.y + P.size.y : pos.y);
+
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ease);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.f);
@@ -272,6 +286,7 @@ inline bool BeginTogglePopup()
 
     // 0 = фон попапа, 1 = фон секций, 2 = содержимое
     ImDrawList* dl = ImGui::GetWindowDrawList();
+    P.vtx_begin = dl->VtxBuffer.Size;      // всё, что нарисуем дальше, потом масштабируется
     dl->ChannelsSplit(3);
     dl->ChannelsSetCurrent(2);
 
@@ -440,8 +455,11 @@ inline bool PopupDropdown(const char* label, bool* selected, const char* const* 
                         ImDrawFlags_None, ImMax(1.5f, u * 0.12f));
     }
 
-    if (D.id == id && (D.open || D.alpha > 0.f))
-        if (detail::DropdownList(id, box, selected, items, count, multi)) changed = true;
+    if (D.id == id && (D.open || D.alpha > 0.f)) {
+        // кнопка с учётом анимации попапа, чтобы список и попап закрывались согласованно
+        const ImRect box_t(detail::PopupXform(box.Min), detail::PopupXform(box.Max));
+        if (detail::DropdownList(id, box_t, selected, items, count, multi)) changed = true;
+    }
 
     return changed;
 }
@@ -503,10 +521,19 @@ inline void EndTogglePopup()
         dl->AddRect(p0, p1, ImGui::GetColorU32(C.border), rd, 0, 1.f);
         dl->PopClipRect();
 
-        P.pos  = p0;
+        P.pos  = p0;                       // прямоугольник без масштаба: по нему считаются тапы и позиция
         P.size = ImVec2(W, H);
         P.draw_list = dl;
         P.draw_list_frame = ImGui::GetFrameCount();
+    }
+
+    // «выпрыгивание»: масштабируем все вершины попапа (фон, тень, текст, переключатели) вокруг pivot
+    if (P.scale < 0.9999f) {
+        for (int i = P.vtx_begin; i < dl->VtxBuffer.Size; ++i) {
+            ImDrawVert& v = dl->VtxBuffer[i];
+            v.pos.x = P.pivot.x + (v.pos.x - P.pivot.x) * P.scale;
+            v.pos.y = P.pivot.y + (v.pos.y - P.pivot.y) * P.scale;
+        }
     }
 
     dl->ChannelsMerge();
@@ -514,7 +541,6 @@ inline void EndTogglePopup()
     ImGui::PopStyleVar(5);
 }
 
-// Один раз за кадр, после меню и до ImGui::Render().
 inline PopupVisual PopupEndFrame()
 {
     detail::PopupState& P = detail::Popup();
@@ -532,10 +558,12 @@ inline PopupVisual PopupEndFrame()
     if (D.submitted_frame != frame && (D.open || D.alpha > 0.f))
         detail::DropdownReset();
 
+    // блюр под попапом должен повторять его анимацию размера
+    const float s = P.scale;
     out.visible    = P.alpha > 0.f && P.size.x > 0.f && P.draw_list_frame == frame;
-    out.pos        = P.pos;
-    out.size       = P.size;
-    out.rounding   = C.rounding * ImGui::GetFontSize();
+    out.pos        = ImVec2(P.pivot.x + (P.pos.x - P.pivot.x) * s, P.pivot.y + (P.pos.y - P.pivot.y) * s);
+    out.size       = ImVec2(P.size.x * s, P.size.y * s);
+    out.rounding   = C.rounding * ImGui::GetFontSize() * s;
     out.alpha      = detail::Eased(P.alpha);
     out.draw_list  = P.draw_list;
     out.draw_list2 = (D.draw_list_frame == frame && D.alpha > 0.f) ? D.draw_list : nullptr;
