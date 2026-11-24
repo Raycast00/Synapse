@@ -335,6 +335,25 @@ static PopupLayerView *g_popupLayer;
                 {
                     ImGui::SameLine();
                     Glass::Toggle("Silent", &aim::silent);
+                    if (Glass::BeginTogglePopup())
+                    {
+                        if (Glass::BeginPopupSection())
+                        {
+                            Glass::PopupToggle("Double Tap", &aim::silent_additional::double_tap);
+                            Glass::PopupDropdown("Backtrack", aim::silent_additional::silent_backtrack, aim::silent_additional::silent_backtrack_effort, 4);
+                            Glass::PopupDropdown("Remove Spread", aim::silent_additional::silent_spread, aim::silent_additional::silent_spread_effort, 2);
+                            Glass::PopupSlider("Extrapolation", &aim::silent_additional::silent_extrapolation, 0.f, 100.f, "%.0f%%");
+
+                            Glass::EndPopupSection();
+                        }
+                        if (Glass::BeginPopupSection())
+                        {
+                            Glass::PopupDropdown("Delay Shot", aim::silent_additional::silent_delay, aim::silent_additional::silent_spread_effort, 2, false);
+
+                            Glass::EndPopupSection();
+                        }
+                        Glass::EndTogglePopup();
+                    }
                 }
                 Glass::Toggle("Automatic Fire", &aim::automatic_fire);
 
@@ -402,13 +421,13 @@ static PopupLayerView *g_popupLayer;
                 {
                     if (Glass::BeginPopupSection())
                     {
-                        Glass::PopupToggle("Blah blah blah", &miscellaneous::thirdperson_popup::blah);
+                        Glass::PopupToggle("Blah blah blah", &miscellaneous::thirdperson_additional::blah);
                         Glass::PopupDropdown("Bleh", sel, items, 3);
                         Glass::EndPopupSection();
                     }
                     if (Glass::BeginPopupSection())
                     {
-                        Glass::PopupToggle("Disable Overhead", &miscellaneous::thirdperson_popup::disable_overhead);
+                        Glass::PopupToggle("Disable Overhead", &miscellaneous::thirdperson_additional::disable_overhead);
                         Glass::EndPopupSection();
                     }
                     Glass::EndTogglePopup();

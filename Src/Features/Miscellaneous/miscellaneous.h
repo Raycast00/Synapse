@@ -3,9 +3,9 @@ namespace miscellaneous
     void run();
 
     inline bool force_thirdperson = false;
-    namespace thirdperson_popup
+    namespace thirdperson_additional
     {
-        inline bool blah = false;
-        inline bool disable_overhead = false;
+        static bool blah = false;
+        static bool disable_overhead = false;
     }
 }
