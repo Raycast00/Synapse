@@ -19,6 +19,15 @@ namespace aim
 
         static bool silent_delay[2] = { false, false };
         static const char* silent_delay_effort[2] = { "Damage", "Hit Chance" };
+
+        static bool refine_shot = false;
+    }
+
+    inline bool silent_force_shot = false;
+    namespace silent_force_additional
+    {
+        static float minimum_hit_chance = 10.f;
+        static float extrapolation_safety = 75.f;
     }
 
     inline bool anti_aim = false;

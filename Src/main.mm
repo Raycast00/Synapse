@@ -343,6 +343,7 @@ static PopupLayerView *g_popupLayer;
                             Glass::PopupDropdown("Backtrack", aim::silent_additional::silent_backtrack, aim::silent_additional::silent_backtrack_effort, 4, false);
                             Glass::PopupDropdown("Remove Spread", aim::silent_additional::silent_spread, aim::silent_additional::silent_spread_effort, 2, false);
                             Glass::PopupSlider("Extrapolation", &aim::silent_additional::silent_extrapolation, 0.f, 100.f, "%.0f%%");
+                            Glass::PopupToggle("Refine Shot", &aim::silent_additional::refine_shot);
 
                             Glass::EndPopupSection();
                         }
@@ -353,6 +354,21 @@ static PopupLayerView *g_popupLayer;
                             Glass::EndPopupSection();
                         }
                         Glass::EndTogglePopup();
+                    }
+                    if (aim::silent)
+                    {
+                        Glass::Toggle("Force Shot", &aim::silent_force_shot, true);
+                        if (Glass::BeginTogglePopup())
+                        {
+                            if (Glass::BeginPopupSection())
+                            {
+                                Glass::PopupSlider("Min. Hit Chance", &aim::silent_force_additional::minimum_hit_chance, 0.f, 100.f, "%.0f%%");
+                                Glass::PopupSlider("Extrapolation Safety", &aim::silent_force_additional::extrapolation_safety, 0.f, 100.f, "%.0f%%");
+
+                                Glass::EndPopupSection();
+                            }
+                            Glass::EndTogglePopup();
+                        }
                     }
                 }
                 Glass::Toggle("Aim Through Walls", &aim::aim_through_walls);
