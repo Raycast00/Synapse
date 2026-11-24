@@ -15,7 +15,7 @@ namespace aim
         static bool silent_spread[2] = { true, false };
         static const char* silent_spread_effort[2] = { "Off", "Full" };
 
-        static float silent_extrapolation = 50.f;
+        static float silent_extrapolation = 15.f;
 
         static bool silent_delay[2] = { false, false };
         static const char* silent_delay_effort[2] = { "Damage", "Hit Chance" };

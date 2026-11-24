@@ -52,6 +52,10 @@ namespace
         constexpr uintptr_t Arms_CameraTransform = 0x178;
         // ArmsController._timeFired — подтверждено эмпирически (rage.mm): растёт только во время стрельбы.
         constexpr uintptr_t Arms_TimeFired       = 0x1BC;
+
+        // PlayerNetwork — бэктрек/экстраполяция (dump.cs)
+        constexpr uintptr_t Net_NetworkPosition      = 0xD4;  // networkPosition — текущая интерполированная позиция
+        constexpr float     MaxExtrapolationDuration = 0.25f; // PlayerNetwork.MaxExtrapolationDuration, реальная константа
     }
 
     struct Api
@@ -67,6 +71,8 @@ namespace
         // Настоящие трейсы игры для проверки стен сайлента (dump.cs: SourceTrace, ScarletWork.Hit.BulletTrace)
         void *kSourceTrace{}, *fMask{};
         void *kBulletTrace{}, *mClearNearby{}, *mHardBlocked{};
+        // PlayerNetwork — бэктрек/экстраполяция
+        void *kNet{}, *mTryGetPos{}, *mRenderTime{}, *mSnapAge{}, *mRemoteVel{};
     } A;
 
     bool ResolveApi()
@@ -123,6 +129,12 @@ namespace
         A.mClearNearby = il::Method(A.kBulletTrace, "ClearNearby", 2);
         A.mHardBlocked = il::Method(A.kBulletTrace, "HardBlocked", 3);
 
+        A.kNet        = il::Class("", "PlayerNetwork", "Assembly-CSharp");
+        A.mTryGetPos  = il::Method(A.kNet, "TryGetPosition", 2);
+        A.mRenderTime = il::Method(A.kNet, "get_RenderTime", 0);
+        A.mSnapAge    = il::Method(A.kNet, "get_SnapshotAge", 0);
+        A.mRemoteVel  = il::Method(A.kNet, "get_RemoteVelocity", 0);
+
         A.ready = A.missing.empty();
         return A.ready;
     }
@@ -163,6 +175,13 @@ namespace
         void* r = il::Invoke(m, inst, nullptr);
         if (!il::ValidPtr((uintptr_t)r)) return false;
         out = *(float*)((uint8_t*)r + 0x10);
+        return true;
+    }
+    bool CallDouble(void* m, void* inst, double& out)
+    {
+        void* r = il::Invoke(m, inst, nullptr);
+        if (!il::ValidPtr((uintptr_t)r)) return false;
+        out = *(double*)((uint8_t*)r + 0x10);
         return true;
     }
 
@@ -359,7 +378,6 @@ namespace
     // Проверка препятствия для сайлента: решает HardBlocked — "непробиваемая преграда" по классификации
     // самой игры (dump.cs: ScarletWork.Hit.BulletTrace, SourceTrace.Mask). ClearNearby оказался
     // ненадёжным и в решении не участвует, только в диагностике. ThinWall пока не возвращается.
-    // rawClear/rawHard/maskOut — необязательные указатели для живой диагностики в статус-строке.
     LOS CheckWallbang(const V3& eye, const V3& target,
                        bool* rawClear = nullptr, bool* rawHard = nullptr, int* maskOut = nullptr)
     {
@@ -386,13 +404,69 @@ namespace
         return hard ? LOS::Blocked : LOS::Clear;
     }
 
+    // Бэктрек/экстраполяция для уже выбранной цели сайлента. Сдвигаем не кость (историю скелета не
+    // храним), а дельту корневой позиции networkPosition — применяем её к точке хитбокса, так
+    // сохраняется поза. TryGetPosition/RenderTime/SnapshotAge/RemoteVelocity — реальные методы
+    // PlayerNetwork (dump.cs), MaxExtrapolationDuration (0.25с) — реальная константа игры, не наша.
+    bool AdjustAimPoint(uintptr_t candPc, V3& point, char* diagOut, size_t diagCap)
+    {
+        if (!A.kNet || !A.mTryGetPos || !A.mRenderTime) return false;
+
+        bool inc = true;
+        void* a[2] = { il::Type(A.kNet), &inc };
+        uintptr_t net = (uintptr_t)il::Invoke(A.mGetCompInChildren, (void*)candPc, a);
+        if (!il::ValidPtr(net)) return false;
+
+        int backtrackIdx = -1;
+        for (int i = 0; i < 4; i++)
+            if (aim::silent_additional::silent_backtrack[i]) { backtrackIdx = i; break; }
+        bool useExtrapolation = (backtrackIdx < 0) && (aim::silent_additional::silent_extrapolation > 0.01f);
+        if (backtrackIdx < 0 && !useExtrapolation) return false;
+
+        V3 curNetPos = il::Read<V3>(net + Cfg::Net_NetworkPosition);
+
+        if (backtrackIdx >= 0) {
+            double renderTime = 0.0;
+            if (!CallDouble(A.mRenderTime, (void*)net, renderTime)) return false;
+
+            float snapAge = 0.f;
+            if (A.mSnapAge) CallFloat(A.mSnapAge, (void*)net, snapAge);
+            static constexpr float kEffortMul[4] = { 1.0f, 1.5f, 2.0f, 3.0f };
+            float rewind = std::clamp(snapAge * kEffortMul[backtrackIdx], 0.f, Cfg::MaxExtrapolationDuration);
+
+            double targetTime = renderTime - (double)rewind;
+            V3 outPos{};
+            void* args[2] = { &targetTime, &outPos };
+            void* r = il::Invoke(A.mTryGetPos, (void*)net, args);
+            bool got = il::ValidPtr((uintptr_t)r) ? (*((uint8_t*)r + 0x10) != 0) : false;
+            if (!got || !Finite(outPos)) return false;
+
+            point.x += outPos.x - curNetPos.x;
+            point.y += outPos.y - curNetPos.y;
+            point.z += outPos.z - curNetPos.z;
+            if (diagOut) std::snprintf(diagOut, diagCap, "BT %s age=%.2f rew=%.2f",
+                                        aim::silent_additional::silent_backtrack_effort[backtrackIdx], snapAge, rewind);
+            return true;
+        }
+
+        if (A.mRemoteVel) {
+            V3 vel = il::InvokeBoxed<V3>(A.mRemoteVel, (void*)net, nullptr);
+            if (!Finite(vel)) return false;
+            float t = (aim::silent_additional::silent_extrapolation / 100.f) * Cfg::MaxExtrapolationDuration;
+            point.x += vel.x * t; point.y += vel.y * t; point.z += vel.z * t;
+            if (diagOut) std::snprintf(diagOut, diagCap, "EXP t=%.3f", t);
+            return true;
+        }
+        return false;
+    }
+
     static float s_lastHeadY = 0.f;
     static bool  s_haveLastHeadY = false;
 
     // Сайлент: пишем угол, стреляем прямым вызовом Shoot(), восстанавливаем — синхронно, без хуков.
     // Yaw крутим только на bodyTr (камера в иерархии унаследует), pitch — только на camTr локально,
     // чтобы не задваивать поворот. armsCam и TimeFired — чистая диагностика в статус-строке.
-    // Выбор цели (ближайшая к прицелу и не за стеной) делается снаружи, в AimbotFrame.
+    // Выбор цели (ближайшая к прицелу и не за стеной) + бэктрек/экстраполяция делаются снаружи, в AimbotFrame.
     bool SilentFire(void* camTr, void* bodyTr, const V3& eye, const Ang& cur,
                      const V3& targetPos, char* statusOut, size_t statusCap)
     {
@@ -409,7 +483,7 @@ namespace
             std::snprintf(statusOut, statusCap, "CanShoot=false"); return false;
         }
 
-        // Повторная защитная проверка стены прямо перед выстрелом (цель уже отобрана как не-заблокированная).
+        // Повторная защитная проверка стены прямо перед выстрелом (на уже сдвинутой бэктреком/экстраполяцией точке).
         LOS los = CheckWallbang(eye, targetPos);
         if (los == LOS::Blocked) {
             std::snprintf(statusOut, statusCap, "blocked (no LOS)"); return false;
@@ -469,7 +543,7 @@ namespace
 
     void AimbotFrame(ImDrawList* dl, ImVec2 center)
     {
-        char st[420];
+        char st[480];
         if (!ResolveApi()) { std::snprintf(st, sizeof st, "AIM: missing %s", A.missing.c_str()); Status(dl, ImVec2(10,113), st); return; }
 
         double now = ImGui::GetTime();
@@ -549,6 +623,7 @@ namespace
         HeadSrc bestSrc = HeadSrc::None;
         int inFov = 0;
         char silentStatus[96] = "idle";
+        char btDiag[64] = "off";
         bool haveDiag = false; V3 diagPos{};
 
         if (silentActive) {
@@ -580,6 +655,8 @@ namespace
             if (!best) {
                 if (list.empty()) std::snprintf(silentStatus, sizeof silentStatus, "no target");
                 else              std::snprintf(silentStatus, sizeof silentStatus, "all blocked (%d)", blockedCnt);
+            } else {
+                AdjustAimPoint(best->pc, bestPos, btDiag, sizeof btDiag);
             }
         } else {
             if (W.lockedPc) {
@@ -686,7 +763,7 @@ namespace
 
         int bestMask = best ? il::Read<int>(best->pc + Cfg::PC_HiddenMask) : -1;
         std::snprintf(st, sizeof st,
-            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d wt=%d trace=%d cn=%d hb=%d msk=%d | eY=%.1f eP=%.1f %s | headSrc=%s mask=0x%X headY=%.2f dY=%+.2f | silent=%s",
+            "AIM pc=%d cand=%d fov=%d tgt=%d lock=%d ovr=%d wt=%d trace=%d cn=%d hb=%d msk=%d | eY=%.1f eP=%.1f %s | headSrc=%s mask=0x%X headY=%.2f dY=%+.2f | silent=%s | %s",
             W.nPc, (int)W.cands.size(), inFov, best ? 1 : 0, (int)(W.lockedPc != 0),
             overriding ? 1 : 0,
             aim::aim_through_walls ? 1 : 0,
@@ -695,7 +772,8 @@ namespace
             eY, eP,
             overriding ? "OVERRIDE" : (wrote ? "writing" : "idle"),
             srcName, bestMask, best ? bestPos.y : 0.f, headYDelta,
-            silentActive ? silentStatus : "off");
+            silentActive ? silentStatus : "off",
+            silentActive ? btDiag : "");
 
         Status(dl, ImVec2(10, 113), st);
     }
