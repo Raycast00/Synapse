@@ -30,6 +30,7 @@ static bool   g_checkbox = false;
 static bool s_demo_fill = false, s_demo_glow = false, s_demo_transparent = false, s_demo_overlay = false;
 static bool sel[3] = { false, false, false };
 static const char* items[3] = { "Head", "Chest", "Legs" };
+static float s_demo_slider = 60.f;
 
 // touch state: клик уходит в imgui через кадр после hover
 static ImVec2 g_tPos = ImVec2(-FLT_MAX, -FLT_MAX);
@@ -255,6 +256,7 @@ static PopupLayerView *g_popupLayer;
                 {
                     if (Glass::BeginPopupSection())
                     {
+                        Glass::PopupSlider("Exponent", &s_demo_slider, 0.f, 100.f, "%.0f%%");
                         Glass::PopupToggle("Fill", &s_demo_fill);
                         Glass::PopupToggle("Glow", &s_demo_glow);
                         Glass::EndPopupSection();
