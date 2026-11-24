@@ -334,7 +334,7 @@ static PopupLayerView *g_popupLayer;
                 if (aim::aimbot)
                 {
                     ImGui::SameLine();
-                    Glass::Toggle("Silent", &aim::silent);
+                    Glass::Toggle("Silent", &aim::silent, true);
                     if (Glass::BeginTogglePopup())
                     {
                         if (Glass::BeginPopupSection())
