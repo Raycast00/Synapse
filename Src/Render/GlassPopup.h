@@ -1,6 +1,8 @@
 #pragma once
 #include "GlassWidgets.h"
 #include <string>
+#include <cmath>
+#include <cstring>
 
 namespace Glass {
 
@@ -41,6 +43,20 @@ struct PopupConfig {
     float list_open_scale = 0.90f; // с какого масштаба список «выскакивает»
     float list_anim       = 0.18f; // секунд
     ImVec4 list_tint = ImVec4(0.30f, 0.30f, 0.31f, 0.93f);
+
+    float slider_w          = 7.5f;    // ширина дорожки
+    float slider_h          = 0.5f;    // толщина дорожки
+    float slider_speed      = 22.f;    // скорость плавного движения заливки (1/сек)
+    float bubble_pad_x      = 0.65f;
+    float bubble_pad_y      = 0.3f;
+    float bubble_gap        = 0.35f;
+    float bubble_round      = 0.5f;
+    float bubble_open_scale = 0.85f;   // с какого масштаба окошко «выпрыгивает»
+    float bubble_speed      = 14.f;    // скорость появления и исчезновения окошка (1/сек)
+    bool  bubble_above      = true;    // окошко над слайдером (как на макете); false = под ним
+    ImVec4 slider_track = ImVec4(0.f, 0.f, 0.f, 0.28f);
+    ImVec4 slider_fill  = ImVec4(0.74f, 0.74f, 0.74f, 1.f);
+    ImVec4 bubble_fill  = ImVec4(0.17f, 0.17f, 0.18f, 0.96f);
 };
 inline PopupConfig& PopupCfg() { static PopupConfig c; return c; }
 
@@ -83,6 +99,52 @@ inline void DropdownReset()
 {
     DropdownState& D = Dropdown();
     D.open = false; D.alpha = 0.f; D.id = 0; D.blocking = false;
+}
+
+struct SliderAnim { float disp = 0.f; float bubble = 0.f; };   // отображаемая доля заливки и видимость окошка
+inline SliderAnim& SliderState(ImGuiID id, float init_frac)
+{
+    static std::unordered_map<ImGuiID, SliderAnim> s;
+    auto it = s.find(id);
+    if (it == s.end()) { SliderAnim a; a.disp = init_frac; it = s.emplace(id, a).first; }
+    return it->second;
+}
+
+// Округление до точности формата: "%.0f" -> целые, "%.1f" -> десятые. Формат без точности не округляем.
+inline float RoundToFormat(float v, const char* fmt)
+{
+    if (!fmt) return v;
+    const char* dot = strchr(fmt, '.');
+    if (!dot || dot[1] < '0' || dot[1] > '9') return v;
+    float scale = 1.f;
+    for (int i = 0; i < dot[1] - '0'; ++i) scale *= 10.f;
+    return roundf(v * scale) / scale;
+}
+
+// Заливка = пересечение таблетки-дорожки с полосой x <= fill_x. Строится путём без клипа,
+// поэтому корректно масштабируется вместе с попапом и точно повторяет скругления дорожки.
+inline void FillPillUpTo(ImDrawList* dl, const ImRect& tr, float fill_x, ImU32 col)
+{
+    const float r  = tr.GetHeight() * 0.5f;
+    const float cy = tr.Min.y + r;
+    const ImVec2 cl(tr.Min.x + r, cy), cr(tr.Max.x - r, cy);
+    fill_x = ImClamp(fill_x, tr.Min.x, tr.Max.x);
+    if (fill_x <= tr.Min.x + 0.5f) return;
+
+    if (fill_x < cl.x) {                                   // только кусочек левой «шапки»
+        const float phi = acosf(ImClamp((fill_x - cl.x) / r, -1.f, 1.f));
+        dl->PathArcTo(cl, r, phi, IM_PI * 2.f - phi);
+    } else if (fill_x <= cr.x) {                           // левая шапка и прямой участок
+        dl->PathArcTo(cl, r, IM_PI * 0.5f, IM_PI * 1.5f);
+        dl->PathLineTo(ImVec2(fill_x, cy - r));
+        dl->PathLineTo(ImVec2(fill_x, cy + r));
+    } else {                                               // дошли до правой «шапки»
+        const float a = acosf(ImClamp((fill_x - cr.x) / r, -1.f, 1.f));
+        dl->PathArcTo(cl, r, IM_PI * 0.5f, IM_PI * 1.5f);
+        dl->PathArcTo(cr, r, IM_PI * 1.5f, IM_PI * 2.f - a);
+        dl->PathArcTo(cr, r, a, IM_PI * 0.5f);
+    }
+    dl->PathFillConvex(col);
 }
 
 // Список dropdown: отдельное окно без фона, все рисуется вручную и масштабируется вокруг pivot.
@@ -237,8 +299,9 @@ inline bool BeginTogglePopup()
     D.blocking = D.open;
 
     // тап мимо попапа (по отпусканию) закрывает; кадр открытия пропускаем, иначе тот же тап закроет попап;
-    // пока открыт список dropdown, тап закрывает сначала его
-    if (P.open && !D.open && P.size.x > 0.f && P.opened_frame != frame && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+    // пока открыт список dropdown, тап закрывает сначала его; пока тянут слайдер, попап не закрываем
+    if (P.open && !D.open && P.size.x > 0.f && P.opened_frame != frame &&
+        frame - P.interacting_frame > 1 && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
         const ImRect r(P.pos, ImVec2(P.pos.x + P.size.x, P.pos.y + P.size.y));
         if (!r.Contains(io.MousePos)) P.open = false;
     }
@@ -261,8 +324,7 @@ inline bool BeginTogglePopup()
     }
     ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
 
-    // «выпрыгивание»: масштаб вокруг точки на границе попапа, ближайшей к кнопке с точками.
-    // Точка лежит на границе окна, поэтому уменьшенное содержимое не выходит за его клип.
+    // «выпрыгивание»: масштаб вокруг точки на границе попапа, ближайшей к кнопке с точками
     const float ease = detail::Eased(P.alpha);
     P.scale = C.popup_open_scale + (1.f - C.popup_open_scale) * ease;
     const bool flipped = (pos.y < P.anchor.y - 0.5f);
@@ -284,10 +346,10 @@ inline bool BeginTogglePopup()
     ImGui::Begin("##glass_popup", nullptr, flags);
     ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());   // всегда над окном меню
 
-    // 0 = фон попапа, 1 = фон секций, 2 = содержимое
+    // 0 = фон попапа, 1 = фон секций, 2 = содержимое, 3 = надстройки (окошко значения слайдера)
     ImDrawList* dl = ImGui::GetWindowDrawList();
     P.vtx_begin = dl->VtxBuffer.Size;      // всё, что нарисуем дальше, потом масштабируется
-    dl->ChannelsSplit(3);
+    dl->ChannelsSplit(4);
     dl->ChannelsSetCurrent(2);
 
     detail::Section() = detail::SectionState();
@@ -461,6 +523,99 @@ inline bool PopupDropdown(const char* label, bool* selected, const char* const* 
         if (detail::DropdownList(id, box_t, selected, items, count, multi)) changed = true;
     }
 
+    return changed;
+}
+
+inline bool PopupSlider(const char* label, float* v, float v_min, float v_max, const char* format = "%.0f")
+{
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    if (window->SkipItems || !v || !(v_max > v_min)) return false;
+
+    const PopupConfig& C = PopupCfg();
+    detail::PopupState& P = detail::Popup();
+    ImGuiIO& io = ImGui::GetIO();
+    const int frame = ImGui::GetFrameCount();
+    const float u       = ImGui::GetFontSize();
+    const float inner_w = (C.width - 2.f * C.pad) * u;
+    const float row_h   = C.row_h * u;
+    const float px      = C.section_pad_x * u;
+    const ImGuiID id    = window->GetID(label);
+
+    const ImVec2 pos = window->DC.CursorPos;
+    const ImRect row(pos, ImVec2(pos.x + inner_w, pos.y + row_h));
+    ImGui::ItemSize(row);
+
+    const float tw = C.slider_w * u, th = C.slider_h * u;
+    const ImRect track(ImVec2(row.Max.x - px - tw, row.Min.y + (row_h - th) * 0.5f),
+                       ImVec2(row.Max.x - px,      row.Min.y + (row_h + th) * 0.5f));
+    const float pad_hit = 0.3f * u;       // область нажатия шире и выше самой тонкой дорожки
+    const ImRect hit(ImVec2(track.Min.x - pad_hit, row.Min.y), ImVec2(track.Max.x + pad_hit, row.Max.y));
+
+    ImDrawList* dl = window->DrawList;
+
+    const char* lend = ImGui::FindRenderedTextEnd(label);
+    if (lend > label)
+        dl->AddText(ImVec2(row.Min.x + px, row.Min.y + (row_h - ImGui::GetTextLineHeight()) * 0.5f),
+                    ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.92f)), label, lend);
+
+    bool changed = false;
+    if (ImGui::ItemAdd(hit, id)) {
+        bool hovered = false, held = false;
+        if (!detail::Dropdown().blocking) {          // пока открыт список dropdown, слайдер не реагирует
+            ImGui::ButtonBehavior(hit, id, &hovered, &held);
+            if (held) {
+                P.interacting_frame = frame;
+                const float t = ImSaturate((io.MousePos.x - track.Min.x) / track.GetWidth());
+                float nv = detail::RoundToFormat(v_min + t * (v_max - v_min), format);
+                nv = ImClamp(nv, v_min, v_max);
+                if (nv != *v) { *v = nv; changed = true; }
+            }
+        }
+
+        // плавное движение заливки и появление окошка
+        const float target = ImSaturate((*v - v_min) / (v_max - v_min));
+        detail::SliderAnim& A = detail::SliderState(id, target);
+        A.disp += (target - A.disp) * ImMin(io.DeltaTime * C.slider_speed, 1.f);
+        if (ImFabs(A.disp - target) < 0.0005f) A.disp = target;
+        A.bubble += ((held ? 1.f : 0.f) - A.bubble) * ImMin(io.DeltaTime * C.bubble_speed, 1.f);
+        if (!held && A.bubble < 0.003f) A.bubble = 0.f;
+
+        // дорожка и заливка
+        dl->AddRectFilled(track.Min, track.Max, ImGui::GetColorU32(C.slider_track), th * 0.5f);
+        const float fill_x = track.Min.x + A.disp * track.GetWidth();
+        detail::FillPillUpTo(dl, track, fill_x, ImGui::GetColorU32(C.slider_fill));
+
+        // окошко со значением: над краем заливки, проявляется и «выпрыгивает»
+        if (A.bubble > 0.001f) {
+            const float bt = detail::Eased(A.bubble);
+            const float bs = C.bubble_open_scale + (1.f - C.bubble_open_scale) * bt;
+
+            char buf[48];
+            ImFormatString(buf, sizeof(buf), format, *v);
+            const ImVec2 ts = ImGui::CalcTextSize(buf);
+            const float bw = ts.x + 2.f * C.bubble_pad_x * u;
+            const float bh = ts.y + 2.f * C.bubble_pad_y * u;
+            const float gap = C.bubble_gap * u;
+            const float cx = ImClamp(fill_x, row.Min.x + bw * 0.5f, row.Max.x - bw * 0.5f);
+            const float top = C.bubble_above ? track.Min.y - gap - bh : track.Max.y + gap;
+            const ImVec2 pivot(cx, C.bubble_above ? top + bh : top);     // растёт от края, ближайшего к дорожке
+            auto S = [&](float x, float y) { return ImVec2(pivot.x + (x - pivot.x) * bs, pivot.y + (y - pivot.y) * bs); };
+
+            dl->ChannelsSetCurrent(3);              // поверх всего содержимого попапа
+            dl->PushClipRectFullScreen();           // окошко может выходить за край попапа
+            const float rr = C.bubble_round * u * bs;
+            const ImVec4 bf = C.bubble_fill;
+            dl->AddRectFilled(S(cx - bw * 0.5f, top), S(cx + bw * 0.5f, top + bh),
+                              ImGui::GetColorU32(ImVec4(bf.x, bf.y, bf.z, bf.w * bt)), rr);
+            dl->AddRect(S(cx - bw * 0.5f, top), S(cx + bw * 0.5f, top + bh),
+                        ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.14f * bt)), rr, 0, 1.f);
+            dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * bs,
+                        S(cx - ts.x * 0.5f, top + (bh - ts.y) * 0.5f),
+                        ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.95f * bt)), buf);
+            dl->PopClipRect();
+            dl->ChannelsSetCurrent(2);
+        }
+    }
     return changed;
 }
 

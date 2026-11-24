@@ -23,6 +23,8 @@ struct PopupState {
     float   scale = 1.f;                 // масштаб попапа в этом кадре (анимация «выпрыгивания»)
     ImVec2  pivot = ImVec2(0, 0);        // точка, от которой масштабируем
     int     vtx_begin = 0;               // с какой вершины draw list попапа начинается его содержимое
+
+    int     interacting_frame = -10;     // последний кадр, когда тянули слайдер (чтобы тап-отпускание вне попапа его не закрыл)
 };
 inline PopupState& Popup() { static PopupState s; return s; }
 
