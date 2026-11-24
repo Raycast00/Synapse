@@ -22,6 +22,7 @@ jobs:
             Src/Features/Aim/aim.mm \
             Src/Features/Rage/rage.mm \
             Src/Features/Inventory/inventory.mm \
+            Src/Features/Miscellaneous/miscellaneous.mm \
             Src/il2cpp/il2cpp.mm \
             Src/Memory/KittyAsm.cpp \
             Src/Memory/KittyIOFile.cpp \
