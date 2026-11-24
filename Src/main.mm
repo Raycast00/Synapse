@@ -340,8 +340,8 @@ static PopupLayerView *g_popupLayer;
                         if (Glass::BeginPopupSection())
                         {
                             Glass::PopupToggle("Double Tap", &aim::silent_additional::double_tap);
-                            Glass::PopupDropdown("Backtrack", aim::silent_additional::silent_backtrack, aim::silent_additional::silent_backtrack_effort, 4);
-                            Glass::PopupDropdown("Remove Spread", aim::silent_additional::silent_spread, aim::silent_additional::silent_spread_effort, 2);
+                            Glass::PopupDropdown("Backtrack", aim::silent_additional::silent_backtrack, aim::silent_additional::silent_backtrack_effort, 4, false);
+                            Glass::PopupDropdown("Remove Spread", aim::silent_additional::silent_spread, aim::silent_additional::silent_spread_effort, 2, false);
                             Glass::PopupSlider("Extrapolation", &aim::silent_additional::silent_extrapolation, 0.f, 100.f, "%.0f%%");
 
                             Glass::EndPopupSection();
