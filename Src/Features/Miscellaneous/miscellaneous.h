@@ -5,7 +5,7 @@ namespace miscellaneous
     inline bool force_thirdperson = false;
     namespace thirdperson_additional
     {
-        static bool blah = false;
+        static float distance = 10.f;
         static bool disable_overhead = false;
     }
 }

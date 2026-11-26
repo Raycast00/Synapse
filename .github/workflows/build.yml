@@ -20,6 +20,7 @@ jobs:
             Src/Render/GlassBackdrop.mm \
             Src/Features/Visuals/visuals.mm \
             Src/Features/Aim/aim.mm \
+            Src/Features/Aim/extrapolation/extrapolation.cpp \
             Src/Features/Rage/rage.mm \
             Src/Features/Inventory/inventory.mm \
             Src/Features/Miscellaneous/miscellaneous.mm \

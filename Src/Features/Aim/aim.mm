@@ -2,6 +2,8 @@
 #include "imgui.h"
 #include "il2cpp/il2cpp.h"
 
+#include "extrapolation/extrapolation.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -73,6 +75,7 @@ namespace
         void *kBulletTrace{}, *mClearNearby{}, *mHardBlocked{};
         // PlayerNetwork — бэктрек/экстраполяция
         void *kNet{}, *mTryGetPos{}, *mRenderTime{}, *mSnapAge{}, *mRemoteVel{};
+        void *kConVars{}, *fConFriction{}, *fConStopSpeed{}, *fConGravity{};
     } A;
 
     bool ResolveApi()
@@ -134,6 +137,11 @@ namespace
         A.mRenderTime = il::Method(A.kNet, "get_RenderTime", 0);
         A.mSnapAge    = il::Method(A.kNet, "get_SnapshotAge", 0);
         A.mRemoteVel  = il::Method(A.kNet, "get_RemoteVelocity", 0);
+
+        A.kConVars      = il::Class("", "MovementConVars", "Assembly-CSharp");
+        A.fConFriction  = A.kConVars ? il::Field(A.kConVars, "Friction")  : nullptr;
+        A.fConStopSpeed = A.kConVars ? il::Field(A.kConVars, "StopSpeed") : nullptr;
+        A.fConGravity   = A.kConVars ? il::Field(A.kConVars, "Gravity")   : nullptr;
 
         A.ready = A.missing.empty();
         return A.ready;
@@ -461,12 +469,31 @@ namespace
             return true;
         }
 
-        if (A.mRemoteVel) {
+                if (A.mRemoteVel) {
             V3 vel = il::InvokeBoxed<V3>(A.mRemoteVel, (void*)net, nullptr);
             if (!Finite(vel)) return false;
-            float t = (aim::silent_additional::silent_extrapolation / 100.f) * Cfg::MaxExtrapolationDuration;
-            point.x += vel.x * t; point.y += vel.y * t; point.z += vel.z * t;
-            if (diagOut) std::snprintf(diagOut, diagCap, "EXP t=%.3f", t);
+
+            float pct = aim::silent_additional::silent_extrapolation / 100.f;
+            int32_t ticks = (int32_t)std::lround(pct * (Cfg::MaxExtrapolationDuration / extrapolation::MOVE_TICK));
+            if (ticks <= 0) return false;
+
+            extrapolation::MovementTuning tuning;
+            tuning.friction  = A.fConFriction  ? il::StaticField<float>(A.fConFriction)  : 0.f;
+            tuning.stopSpeed = A.fConStopSpeed ? il::StaticField<float>(A.fConStopSpeed) : 0.f;
+            tuning.gravity   = A.fConGravity   ? il::StaticField<float>(A.fConGravity)   : 0.f;
+
+            extrapolation::PlayerState st;
+            st.position = { curNetPos.x, curNetPos.y, curNetPos.z };
+            st.velocity = { vel.x, vel.y, vel.z };
+
+            static extrapolation::Extrapolator extrap;
+            auto res = extrap.extrapolate(st, ticks, tuning);
+            if (!res.valid) return false;
+
+            point.x += res.final_state.position.x - curNetPos.x;
+            point.y += res.final_state.position.y - curNetPos.y;
+            point.z += res.final_state.position.z - curNetPos.z;
+            if (diagOut) std::snprintf(diagOut, diagCap, "EXP t=%d fr=%.2f gr=%.0f", res.ticks_extrapolated, tuning.friction, tuning.gravity);
             return true;
         }
         return false;

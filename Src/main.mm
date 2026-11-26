@@ -339,6 +339,7 @@ static PopupLayerView *g_popupLayer;
                     {
                         if (Glass::BeginPopupSection())
                         {
+                            Glass::PopupToggle("Automatic Fire", &aim::silent_additional::automatic_fire);
                             Glass::PopupToggle("Double Tap", &aim::silent_additional::double_tap);
                             Glass::PopupDropdown("Backtrack", aim::silent_additional::silent_backtrack, aim::silent_additional::silent_backtrack_effort, 4, false);
                             Glass::PopupDropdown("Remove Spread", aim::silent_additional::silent_spread, aim::silent_additional::silent_spread_effort, 2, false);
@@ -437,8 +438,7 @@ static PopupLayerView *g_popupLayer;
                 {
                     if (Glass::BeginPopupSection())
                     {
-                        Glass::PopupToggle("Blah blah blah", &miscellaneous::thirdperson_additional::blah);
-                        Glass::PopupDropdown("Bleh", sel, items, 3);
+                        Glass::PopupSlider("Distance", &miscellaneous::thirdperson_additional::distance, 0.f, 20.f, "%.0f%%");
                         Glass::EndPopupSection();
                     }
                     if (Glass::BeginPopupSection())

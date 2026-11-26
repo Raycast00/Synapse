@@ -7,6 +7,7 @@ namespace aim
     inline bool silent = false;
     namespace silent_additional
     {
+        static bool automatic_fire = false;
         static bool double_tap = false;
 
         static bool silent_backtrack[4] = { false, false, false, false };
