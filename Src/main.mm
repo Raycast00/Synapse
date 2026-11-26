@@ -416,7 +416,7 @@ static PopupLayerView *g_popupLayer;
 
                 ImGui::SeparatorText("Weapon");
 
-                Glass::Toggle("Auto Win", &rage::auto_win);
+                Glass::Toggle("Auto Kill", &rage::auto_kill);
 
                 ImGui::EndTabItem();
             }

@@ -18,5 +18,6 @@ namespace rage
     inline bool air_strafe = false;
 
     // Game
+    inline bool auto_kill = false;
     inline bool auto_win = false;
 }

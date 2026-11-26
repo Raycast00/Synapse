@@ -33,6 +33,7 @@ namespace off {
     constexpr uintptr_t airInaccuracy   = 0x68;
     constexpr uintptr_t pelletSpread    = 0xA4;
     constexpr uintptr_t recoilParams    = 0x150;
+    constexpr uintptr_t rechargeTime    = 0xB0;  // _rechargeTime — вероятный реальный gate скорострельности
 
     constexpr uintptr_t arms_AccuracyMult     = 0x114;
     constexpr uintptr_t arms_RecoilMult       = 0x110;
@@ -50,6 +51,7 @@ namespace off {
     // PlayerController
     constexpr uintptr_t pcMovement = 0x40;   // PlayerController._movementController
     constexpr uintptr_t pcArms     = 0x60;   // PlayerController._armsController
+    constexpr uintptr_t pc_IsDeath = 0xA8;   // PlayerController._isDeath
 
     // ArmsController. Источник имён: dump.cs, точная роль _timeFired/_nextDryFire в геймплее не прослежена.
     constexpr uintptr_t arms_MagazineCapacity = 0x1B8;  // short, текущий патрон в магазине
@@ -88,7 +90,7 @@ namespace off {
 }
 
 struct Orig {
-    float pellet, scoped, horiz, vert, air[off::airFloats];
+    float pellet, scoped, horiz, vert, recharge, air[off::airFloats];
     int   edge;
 };
 static std::unordered_map<uintptr_t, Orig> g_orig;
@@ -107,16 +109,17 @@ static void refreshWeapons()
     }
 }
 
-static void applyWeapon(uintptr_t wp, bool spread, bool recoil)
+static void applyWeapon(uintptr_t wp, bool spread, bool recoil, bool rapidFire)
 {
     uintptr_t air = Read<uintptr_t>(wp + off::airInaccuracy);
     uintptr_t rp  = Read<uintptr_t>(wp + off::recoilParams);
 
     if (!g_orig.count(wp)) {
         Orig o{};
-        o.pellet = Read<float>(wp + off::pelletSpread);
-        o.scoped = Read<float>(wp + off::scopedMoveInacc);
-        o.edge   = Read<int>(wp + off::edgeSpreadShots);
+        o.pellet   = Read<float>(wp + off::pelletSpread);
+        o.scoped   = Read<float>(wp + off::scopedMoveInacc);
+        o.edge     = Read<int>(wp + off::edgeSpreadShots);
+        o.recharge = Read<float>(wp + off::rechargeTime);
         if (ok(rp))  { o.horiz = Read<float>(rp + off::horizRange); o.vert = Read<float>(rp + off::vertRange); }
         if (ok(air)) for (int i = 0; i < off::airFloats; i++) o.air[i] = Read<float>(air + off::airStart + i * 4);
         g_orig[wp] = o;
@@ -126,6 +129,7 @@ static void applyWeapon(uintptr_t wp, bool spread, bool recoil)
     Write<float>(wp + off::pelletSpread,    spread ? 0.f : o.pellet);
     Write<float>(wp + off::scopedMoveInacc, spread ? 0.f : o.scoped);
     Write<int>(wp + off::edgeSpreadShots,   spread ? 0   : o.edge);
+    Write<float>(wp + off::rechargeTime,    rapidFire ? 0.f : o.recharge);
     if (ok(air))
         for (int i = 0; i < off::airFloats; i++)
             Write<float>(air + off::airStart + i * 4, spread ? 0.f : o.air[i]);
@@ -147,7 +151,7 @@ static void applyCameraRecoil()
 void rage::ApplyRecoilControl(bool enabled)
 {
     refreshWeapons();
-    for (uintptr_t wp : g_weapons) applyWeapon(wp, false, enabled);
+    for (uintptr_t wp : g_weapons) applyWeapon(wp, false, enabled, false);
     if (enabled) applyCameraRecoil();
 }
 
@@ -190,6 +194,8 @@ static void applyInfinityAmmo()
     Write<int16_t>(arms + off::arms_Capacity, 999);
 }
 
+// _rechargeTime (per-weapon, в applyWeapon) — основной gate скорострельности, вероятно. Это —
+// подстраховка на уровне инстанса, не мешает, даже если роль этих полей не та, что мы думаем.
 static void applyRapidFire()
 {
     uintptr_t pc = localPlayerController();
@@ -215,9 +221,6 @@ static void applyLiveAccuracy()
     if (!ok(arms)) return;
 
     if (rage::no_spread) {
-        // 1.0 / 0.0 — нейтральные значения, выведены из того, что стоя на месте (без штрафа
-        // движения) у тебя и так всё чисто; если после этого разброс станет ХУЖЕ — семантика
-        // обратная, напиши, поменяем на большое значение вместо 1.0.
         Write<float>(arms + off::arms_AccuracyMult, 0.001f);
         Write<float>(arms + off::arms_AccuracyAdditive, 0.0f);
     }
@@ -299,7 +302,6 @@ static void applyAirStrafe()
         vel.x += accelSpeed * dirX;
         vel.z += accelSpeed * dirZ;
     } else {
-        // Резкая смена направления: сохраняем текущую величину скорости, не даём ей просесть.
         vel.x = dirX * horizSpeed;
         vel.z = dirZ * horizSpeed;
     }
@@ -346,18 +348,89 @@ static void applyAutoWin()
     if (mCheckScore) IL2CPP::Invoke(mCheckScore, (void*)gc, nullptr);
 }
 
+// Suicide() — реальный метод игры (dump.cs, PlayerController), ноль аргументов. Вызываем на
+// ЧУЖОМ инстансе — если внутри есть проверка владельца/IsLocal, вызов может отрисоваться только
+// локально и откатиться сервером; verified ниже — грубая проверка по факту упавшего Health, не гарантия.
+static int g_lastKillAttempts = 0;
+static int g_lastKillVerified = 0;
+
+static void applyAutoKill()
+{
+    uintptr_t gc = gameController();
+    if (!ok(gc)) return;
+
+    int32_t state = Read<int32_t>(gc + 0xC0); // GameController._matchState
+    static uintptr_t lastGc = 0;
+    static int32_t lastState = -1;
+    if (gc != lastGc) { lastGc = gc; lastState = state; }
+
+    bool enteredActive = (state == 4 /*ActiveRoundState*/) && (lastState != 4);
+    lastState = state;
+
+    if (!rage::auto_kill || !enteredActive) return;
+
+    uintptr_t localPc = localPlayerController();
+
+    static void* kPC      = IL2CPP::Class("", "PlayerController", "Assembly-CSharp");
+    static void* mSuicide = IL2CPP::Method(kPC, "Suicide", 0);
+    static void* mHealth  = IL2CPP::Method(kPC, "get_Health", 0);
+    if (!mSuicide) return;
+
+    g_lastKillAttempts = 0;
+    g_lastKillVerified = 0;
+
+    for (uintptr_t pc : IL2CPP::FindObjectsOfType(kPC)) {
+        if (!ok(pc) || pc == localPc) continue;
+        if (Read<uint8_t>(pc + off::pc_IsDeath) != 0) continue; // уже мёртв — пропускаем
+
+        g_lastKillAttempts++;
+        IL2CPP::Invoke(mSuicide, (void*)pc, nullptr);
+
+        if (mHealth) {
+            void* r = IL2CPP::Invoke(mHealth, (void*)pc, nullptr);
+            int hp = ok((uintptr_t)r) ? *(int*)((uint8_t*)r + 0x10) : 1;
+            if (hp <= 0 || Read<uint8_t>(pc + off::pc_IsDeath) != 0) g_lastKillVerified++;
+        }
+    }
+}
+
 static void drawStatus(bool ilReady)
 {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
-    char l1[200], l2[200], l3[200];
+    char l1[200], l2[200], l3[200], l4[200];
 
     if (!ilReady) {
         std::snprintf(l1, sizeof l1, "RAGE: IL2CPP not ready");
-        l2[0] = 0; l3[0] = 0;
+        l2[0] = 0; l3[0] = 0; l4[0] = 0;
     } else {
         uintptr_t pc   = localPlayerController();
         uintptr_t arms = ok(pc) ? Read<uintptr_t>(pc + off::pcArms) : 0;
         uintptr_t mv   = ok(pc) ? Read<uintptr_t>(pc + off::pcMovement) : 0;
+        uintptr_t gc   = gameController();
+
+        std::snprintf(l1, sizeof l1,
+            "RAGE tog: ammo=%d rate=%d mbt=%d rec=%d spr=%d win=%d kill=%d | pc=%d arms=%d mv=%d wpn=%d cam=%d gc=%d",
+            rage::infinity_ammo, rage::rapid_fire, rage::MBT, rage::no_recoil, rage::no_spread,
+            rage::auto_win, rage::auto_kill,
+            ok(pc), ok(arms), ok(mv), (int)g_weapons.size(), ok(fpsCamera()), ok(gc));
+
+        std::snprintf(l2, sizeof l2, "RAGE val: mag=%d res=%d timeFired=%.2f freezing=%d grounded=%d",
+            ok(arms) ? (int)Read<int16_t>(arms + off::arms_MagazineCapacity) : -1,
+            ok(arms) ? (int)Read<int16_t>(arms + off::arms_Capacity) : -1,
+            ok(arms) ? Read<float>(arms + off::arms_TimeFired) : -1.f,
+            ok(mv) ? (int)Read<uint8_t>(mv + off::pm_IsFreezing) : -1,
+            ok(mv) ? (int)Read<uint8_t>(mv + off::pm_IsGrounded) : -1);
+
+        std::snprintf(l3, sizeof l3, "RAGE acc: mult=%.3f add=%.2f recMult=%.2f camRV=%.2f camRH=%.2f",
+            ok(arms) ? Read<float>(arms + off::arms_AccuracyMult) : -1.f,
+            ok(arms) ? Read<float>(arms + off::arms_AccuracyAdditive) : -1.f,
+            ok(arms) ? Read<float>(arms + off::arms_RecoilMult) : -1.f,
+            ok(arms) ? Read<float>(arms + off::arms_CamRecoilV) : -1.f,
+            ok(arms) ? Read<float>(arms + off::arms_CamRecoilH) : -1.f);
+
+        std::snprintf(l4, sizeof l4, "RAGE kill: attempts=%d verified=%d | wpn0 recharge=%.3f",
+            g_lastKillAttempts, g_lastKillVerified,
+            !g_weapons.empty() ? Read<float>(g_weapons[0] + off::rechargeTime) : -1.f);
     }
     dl->AddText(ImVec2(11, 81), IM_COL32(0, 0, 0, 255), l1);
     dl->AddText(ImVec2(10, 80), IM_COL32(0, 255, 255, 255), l1);
@@ -369,6 +442,10 @@ static void drawStatus(bool ilReady)
         dl->AddText(ImVec2(11, 113), IM_COL32(0, 0, 0, 255), l3);
         dl->AddText(ImVec2(10, 112), IM_COL32(0, 255, 255, 255), l3);
     }
+    if (l4[0]) {
+        dl->AddText(ImVec2(11, 129), IM_COL32(0, 0, 0, 255), l4);
+        dl->AddText(ImVec2(10, 128), IM_COL32(0, 255, 255, 255), l4);
+    }
 }
 
 void rage::run()
@@ -377,17 +454,18 @@ void rage::run()
     drawStatus(ilReady);
     if (!ilReady) return;
 
-    static bool lastSpread = false, lastRecoil = false, pending = false;
-    if (rage::no_spread != lastSpread || rage::no_recoil != lastRecoil) {
+    static bool lastSpread = false, lastRecoil = false, lastRapid = false, pending = false;
+    if (rage::no_spread != lastSpread || rage::no_recoil != lastRecoil || rage::rapid_fire != lastRapid) {
         lastSpread = rage::no_spread;
         lastRecoil = rage::no_recoil;
+        lastRapid  = rage::rapid_fire;
         pending = true;
     }
     if (pending) {
         refreshWeapons();
         if (!g_weapons.empty()) {
             for (uintptr_t wp : g_weapons)
-                applyWeapon(wp, rage::no_spread, rage::no_recoil);
+                applyWeapon(wp, rage::no_spread, rage::no_recoil, rage::rapid_fire);
             pending = false;
         }
     }
@@ -399,5 +477,6 @@ void rage::run()
     if (rage::MBT)           applyMBT();
     if (rage::no_fall_damage) applyNoFallDamage();
     applyAutoWin();
+    applyAutoKill();
     applyAirStrafe();
 }
